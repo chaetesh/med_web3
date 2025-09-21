@@ -1,15 +1,23 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import ProtectedRoute from '@/components/ProtectedRoute';
 import PageHeader from '@/components/PageHeader';
 import { Card } from '@/components/Card';
 import Button from '@/components/Button';
+import { useAuthStore } from '@/store/useAuthStore';
+import { 
+  DoctorProfileApiService, 
+  DoctorProfile as ApiDoctorProfile, 
+  UpdateDoctorProfileDto,
+  DoctorStats,
+  ApiErrorClass 
+} from '@/lib/services/doctorProfile.service';
+import { UsersApiService } from '@/lib/services/users.service';
 import { 
   User, 
   Mail, 
   Phone, 
-  MapPin, 
   Building, 
   FileText, 
   Shield,
@@ -19,79 +27,219 @@ import {
   Save,
   Camera,
   Award,
-  Calendar
+  Calendar,
+  Loader2,
+  AlertCircle
 } from 'lucide-react';
 
 interface DoctorProfile {
+  // Basic user info from auth
   id: string;
   name: string;
   email: string;
   phone: string;
+  
+  // Professional info from doctor profile
   specialization: string;
   department: string;
   hospital: string;
+  hospitalId?: string;
   licenseNumber: string;
   experience: number;
-  education: string[];
-  certifications: string[];
-  address: string;
+  qualifications: string[];
   bio: string;
   profilePicture?: string;
+  
+  // Status and metadata
   verified: boolean;
   joinedDate: string;
+  isAvailableForConsultation: boolean;
+  
+  // Stats
   patientsServed: number;
   recordsUploaded: number;
+  totalAppointments: number;
+  rating: number;
+  reviewCount: number;
+  
+  // Working info
+  languages?: string[];
+  consultationFees?: {
+    inPerson: number;
+    virtual: number;
+  };
 }
 
 export default function DoctorProfilePage() {
+  const { user, updateUser } = useAuthStore();
   const [isEditing, setIsEditing] = useState(false);
-  const [profile, setProfile] = useState<DoctorProfile>({
-    id: 'DR001',
-    name: 'Dr. Sarah Chen',
-    email: 'sarah.chen@cityhospital.com',
-    phone: '+1-555-0123',
-    specialization: 'Cardiology',
-    department: 'Cardiovascular Department',
-    hospital: 'City General Hospital',
-    licenseNumber: 'MD-2019-4567',
-    experience: 8,
-    education: [
-      'MD - Harvard Medical School (2016)',
-      'BS in Biology - Stanford University (2012)'
-    ],
-    certifications: [
-      'Board Certified in Cardiology',
-      'Advanced Cardiac Life Support (ACLS)',
-      'Echocardiography Certification'
-    ],
-    address: '123 Medical Plaza, New York, NY 10001',
-    bio: 'Experienced cardiologist with 8 years of practice, specializing in interventional cardiology and heart disease prevention. Passionate about patient care and advancing cardiac treatment methods.',
-    verified: true,
-    joinedDate: '2022-01-15',
-    patientsServed: 847,
-    recordsUploaded: 1234
-  });
+  const [profile, setProfile] = useState<DoctorProfile | null>(null);
+  const [tempProfile, setTempProfile] = useState<DoctorProfile | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  const [tempProfile, setTempProfile] = useState<DoctorProfile>(profile);
+  // Load profile data on mount
+  useEffect(() => {
+    const loadProfile = async () => {
+      if (!user) return;
+      
+      try {
+        setLoading(true);
+        setError(null);
+        
+        // Fetch doctor profile and stats in parallel
+        const [doctorProfile, doctorStats] = await Promise.all([
+          DoctorProfileApiService.getMyProfile(),
+          DoctorProfileApiService.getMyStats().catch(() => null) // Stats might not exist yet
+        ]);
+
+        // Combine user data with doctor profile data
+        const combinedProfile: DoctorProfile = {
+          id: user.id,
+          name: `${user.firstName} ${user.lastName}`,
+          email: user.email,
+          phone: '', // Phone not available in auth user
+          
+          specialization: doctorProfile.specialization,
+          department: doctorProfile.department,
+          hospital: 'Hospital Name', // TODO: Fetch from hospital data
+          hospitalId: user.hospitalId,
+          licenseNumber: doctorProfile.licenseNumber,
+          experience: doctorProfile.experience,
+          qualifications: doctorProfile.qualifications ? doctorProfile.qualifications.split(', ') : [],
+          bio: doctorProfile.bio || '',
+          profilePicture: doctorProfile.profilePicture,
+          
+          verified: user.isVerified,
+          joinedDate: new Date().toISOString(), // Using current date as fallback
+          isAvailableForConsultation: doctorProfile.isAvailableForConsultation,
+          
+          patientsServed: doctorStats?.totalPatients || 0,
+          recordsUploaded: doctorStats?.recordsUploaded || 0,
+          totalAppointments: doctorStats?.totalAppointments || 0,
+          rating: doctorStats?.rating || 0,
+          reviewCount: doctorStats?.reviewCount || 0,
+        };
+
+        setProfile(combinedProfile);
+        setTempProfile(combinedProfile);
+      } catch (err) {
+        console.error('Error loading doctor profile:', err);
+        setError(err instanceof ApiErrorClass ? err.message : 'Failed to load profile');
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    loadProfile();
+  }, [user]);
 
   const handleEdit = () => {
+    if (!profile) return;
     setIsEditing(true);
     setTempProfile({ ...profile });
   };
 
-  const handleSave = () => {
-    setProfile({ ...tempProfile });
-    setIsEditing(false);
+  const handleSave = async () => {
+    if (!tempProfile || !profile) return;
+    
+    try {
+      setSaving(true);
+      setError(null);
+
+      // Prepare update data for doctor profile
+      const doctorProfileUpdate: UpdateDoctorProfileDto = {
+        specialization: tempProfile.specialization,
+        department: tempProfile.department,
+        licenseNumber: tempProfile.licenseNumber,
+        experience: tempProfile.experience,
+        bio: tempProfile.bio,
+        qualifications: tempProfile.qualifications.join(', '),
+        isAvailableForConsultation: tempProfile.isAvailableForConsultation,
+      };
+
+      // Update doctor profile
+      await DoctorProfileApiService.updateMyProfile(doctorProfileUpdate);
+
+      // Update basic user info if needed
+      if (tempProfile.name !== profile.name || tempProfile.email !== profile.email || tempProfile.phone !== profile.phone) {
+        const [firstName, ...lastNameParts] = tempProfile.name.split(' ');
+        const lastName = lastNameParts.join(' ');
+        
+        await UsersApiService.updateUser(user!.id, {
+          firstName,
+          lastName,
+          // phone: tempProfile.phone, // Uncomment when phone is added to user schema
+        });
+
+        // Update auth store with new user data
+        updateUser({
+          firstName,
+          lastName,
+        });
+      }
+
+      setProfile({ ...tempProfile });
+      setIsEditing(false);
+    } catch (err) {
+      console.error('Error saving profile:', err);
+      setError(err instanceof ApiErrorClass ? err.message : 'Failed to save profile');
+    } finally {
+      setSaving(false);
+    }
   };
 
   const handleCancel = () => {
+    if (!profile) return;
     setTempProfile({ ...profile });
     setIsEditing(false);
   };
 
   const updateField = (field: keyof DoctorProfile, value: any) => {
-    setTempProfile(prev => ({ ...prev, [field]: value }));
+    if (!tempProfile) return;
+    setTempProfile(prev => prev ? { ...prev, [field]: value } : null);
   };
+
+  // Show loading state
+  if (loading) {
+    return (
+      <ProtectedRoute allowedRoles={['doctor']}>
+        <div className="flex items-center justify-center min-h-[400px]">
+          <div className="text-center">
+            <Loader2 className="w-8 h-8 animate-spin text-blue-600 mx-auto mb-4" />
+            <p className="text-gray-500">Loading profile...</p>
+          </div>
+        </div>
+      </ProtectedRoute>
+    );
+  }
+
+  // Show error state
+  if (error && !profile) {
+    return (
+      <ProtectedRoute allowedRoles={['doctor']}>
+        <div className="flex items-center justify-center min-h-[400px]">
+          <div className="text-center">
+            <AlertCircle className="w-8 h-8 text-red-600 mx-auto mb-4" />
+            <p className="text-red-600 mb-4">{error}</p>
+            <Button onClick={() => window.location.reload()}>Try Again</Button>
+          </div>
+        </div>
+      </ProtectedRoute>
+    );
+  }
+
+  // Don't render if no profile data
+  if (!profile || !tempProfile) {
+    return (
+      <ProtectedRoute allowedRoles={['doctor']}>
+        <div className="flex items-center justify-center min-h-[400px]">
+          <p className="text-gray-500">No profile data found</p>
+        </div>
+      </ProtectedRoute>
+    );
+  }
 
   return (
     <ProtectedRoute allowedRoles={['doctor']}>
@@ -241,23 +389,6 @@ export default function DoctorProfilePage() {
                   )}
                 </div>
               </div>
-              
-              <div className="mt-6">
-                <label className="block text-sm font-medium text-gray-700 mb-2">Address</label>
-                {isEditing ? (
-                  <textarea
-                    value={tempProfile.address}
-                    onChange={(e) => updateField('address', e.target.value)}
-                    rows={2}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                  />
-                ) : (
-                  <div className="flex items-center">
-                    <MapPin className="w-4 h-4 text-gray-400 mr-2" />
-                    <p className="text-gray-900">{profile.address}</p>
-                  </div>
-                )}
-              </div>
             </Card>
 
             {/* Professional Information */}
@@ -340,27 +471,25 @@ export default function DoctorProfilePage() {
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               <Card title="Education">
                 <div className="space-y-3">
-                  {profile.education.map((edu, index) => (
-                    <div key={index} className="flex items-start space-x-3">
-                      <Award className="w-5 h-5 text-blue-600 mt-0.5" />
-                      <div>
-                        <p className="text-sm text-gray-900">{edu}</p>
-                      </div>
+                  <div className="flex items-start space-x-3">
+                    <Award className="w-5 h-5 text-blue-600 mt-0.5" />
+                    <div>
+                      <p className="text-sm text-gray-900">Medical education information not available</p>
+                      <p className="text-xs text-gray-500">Please update your profile</p>
                     </div>
-                  ))}
+                  </div>
                 </div>
               </Card>
               
               <Card title="Certifications">
                 <div className="space-y-3">
-                  {profile.certifications.map((cert, index) => (
-                    <div key={index} className="flex items-start space-x-3">
-                      <Shield className="w-5 h-5 text-green-600 mt-0.5" />
-                      <div>
-                        <p className="text-sm text-gray-900">{cert}</p>
-                      </div>
+                  <div className="flex items-start space-x-3">
+                    <Shield className="w-5 h-5 text-green-600 mt-0.5" />
+                    <div>
+                      <p className="text-sm text-gray-900">Professional certifications not available</p>
+                      <p className="text-xs text-gray-500">Please update your profile</p>
                     </div>
-                  ))}
+                  </div>
                 </div>
               </Card>
             </div>

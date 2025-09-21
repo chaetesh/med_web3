@@ -1,25 +1,28 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { Eye, EyeOff, CheckCircle } from 'lucide-react';
 import { useAuthStore } from '@/store/useAuthStore';
+import { UserRole, RegisterFormData, ValidationErrors } from '@/lib/types/auth.types';
+import { HospitalsApiService } from '@/lib/services/hospitals.service';
 
 export default function RegisterPage() {
   const [step, setStep] = useState(1);
-  const [formData, setFormData] = useState({
+  const [formData, setFormData] = useState<RegisterFormData>({
     // Basic Info
-    role: 'patient' as 'patient' | 'doctor' | 'hospital_admin',
+    role: UserRole.PATIENT,
     email: '',
     password: '',
     confirmPassword: '',
-    name: '',
+    firstName: '',
+    lastName: '',
     phone: '',
     
     // Patient specific
     dateOfBirth: '',
-    gender: 'male' as 'male' | 'female' | 'other',
+    gender: 'male',
     address: '',
     emergencyContactName: '',
     emergencyContactPhone: '',
@@ -44,14 +47,38 @@ export default function RegisterPage() {
   
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
-  const [isLoading, setIsLoading] = useState(false);
-  const [errors, setErrors] = useState<{ [key: string]: string }>({});
+  const [errors, setErrors] = useState<ValidationErrors>({});
+  const [hospitals, setHospitals] = useState<Array<{id: string; name: string; city: string; state: string; address: string}>>([]);
+  const [hospitalsLoading, setHospitalsLoading] = useState(false);
 
-  const { setUser } = useAuthStore();
+  const { register, isLoading, error } = useAuthStore();
   const router = useRouter();
 
-  const validateStep1 = () => {
-    const newErrors: { [key: string]: string } = {};
+  // Fetch hospitals when user selects doctor or hospital admin role
+  useEffect(() => {
+    const fetchHospitals = async () => {
+      if (formData.role === UserRole.DOCTOR || formData.role === UserRole.HOSPITAL_ADMIN) {
+        setHospitalsLoading(true);
+        try {
+          const response = await HospitalsApiService.getHospitalsForRegistration({ limit: 100 });
+          setHospitals(response.hospitals);
+        } catch (error) {
+          console.error('Failed to fetch hospitals:', error);
+          // Set a default hospital option if fetch fails
+          setHospitals([{ id: 'other', name: 'Other (will verify later)', city: '', state: '', address: '' }]);
+        } finally {
+          setHospitalsLoading(false);
+        }
+      } else {
+        setHospitals([]); // Clear hospitals if not doctor or hospital admin role
+      }
+    };
+
+    fetchHospitals();
+  }, [formData.role]);
+
+  const validateStep1 = (): boolean => {
+    const newErrors: ValidationErrors = {};
 
     if (!formData.email) newErrors.email = 'Email is required';
     if (!formData.password) newErrors.password = 'Password is required';
@@ -59,37 +86,42 @@ export default function RegisterPage() {
     if (formData.password !== formData.confirmPassword) {
       newErrors.confirmPassword = 'Passwords do not match';
     }
-    if (!formData.name) newErrors.name = 'Name is required';
+    if (!formData.firstName) newErrors.firstName = 'First name is required';
+    if (!formData.lastName) newErrors.lastName = 'Last name is required';
     if (!formData.phone) newErrors.phone = 'Phone is required';
 
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
   };
 
-  const validateStep2 = () => {
-    const newErrors: { [key: string]: string } = {};
+  const validateStep2 = (): boolean => {
+    const newErrors: ValidationErrors = {};
 
-    if (formData.role === 'patient') {
+    if (formData.role === UserRole.PATIENT) {
       if (!formData.dateOfBirth) newErrors.dateOfBirth = 'Date of birth is required';
       if (!formData.address) newErrors.address = 'Address is required';
       if (!formData.emergencyContactName) newErrors.emergencyContactName = 'Emergency contact name is required';
       if (!formData.emergencyContactPhone) newErrors.emergencyContactPhone = 'Emergency contact phone is required';
-    } else if (formData.role === 'doctor') {
+    } else if (formData.role === UserRole.DOCTOR) {
       if (!formData.licenseNumber) newErrors.licenseNumber = 'License number is required';
       if (!formData.specialization) newErrors.specialization = 'Specialization is required';
       if (!formData.department) newErrors.department = 'Department is required';
-    } else if (formData.role === 'hospital_admin') {
-      if (!formData.hospitalName) newErrors.hospitalName = 'Hospital name is required';
-      if (!formData.hospitalAddress) newErrors.hospitalAddress = 'Hospital address is required';
-      if (!formData.hospitalPhone) newErrors.hospitalPhone = 'Hospital phone is required';
-      if (!formData.hospitalLicense) newErrors.hospitalLicense = 'Hospital license is required';
+    } else if (formData.role === UserRole.HOSPITAL_ADMIN) {
+      // Only require hospital details if creating a new hospital
+      if (!formData.hospitalId || formData.hospitalId === 'new') {
+        if (!formData.hospitalName) newErrors.hospitalName = 'Hospital name is required';
+        if (!formData.hospitalAddress) newErrors.hospitalAddress = 'Hospital address is required';
+        if (!formData.hospitalPhone) newErrors.hospitalPhone = 'Hospital phone is required';
+        if (!formData.hospitalLicense) newErrors.hospitalLicense = 'Hospital license is required';
+      }
+      // If joining existing hospital, hospitalId is already set from the dropdown
     }
 
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
   };
 
-  const handleNext = () => {
+  const handleNext = (): void => {
     if (step === 1 && validateStep1()) {
       setStep(2);
     } else if (step === 2 && validateStep2()) {
@@ -97,37 +129,28 @@ export default function RegisterPage() {
     }
   };
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent): Promise<void> => {
     e.preventDefault();
     if (!formData.agreeToTerms || !formData.agreeToPrivacy) {
       setErrors({ agreement: 'You must agree to the terms and privacy policy' });
       return;
     }
 
-    setIsLoading(true);
-    setErrors({});
+    const registerData = {
+      email: formData.email,
+      password: formData.password,
+      firstName: formData.firstName,
+      lastName: formData.lastName,
+      role: formData.role,
+      ...(formData.role === UserRole.DOCTOR && formData.hospitalId && { hospitalId: formData.hospitalId }),
+      ...(formData.role === UserRole.HOSPITAL_ADMIN && formData.hospitalId && { hospitalId: formData.hospitalId }),
+    };
 
-    try {
-      // Simulate API call
-      await new Promise(resolve => setTimeout(resolve, 2000));
-      
-      // Mock user creation - replace with actual API call
-      const mockUser = {
-        id: Math.random().toString(36),
-        email: formData.email,
-        name: formData.name,
-        role: formData.role,
-        isVerified: false,
-        hospitalId: formData.role === 'doctor' ? formData.hospitalId : undefined,
-        department: formData.role === 'doctor' ? formData.department : undefined
-      };
-
-      setUser(mockUser);
-      router.push('/dashboard');
-    } catch (err) {
-      setErrors({ submit: 'Registration failed. Please try again.' });
-    } finally {
-      setIsLoading(false);
+    const result = await register(registerData);
+    
+    if (result.success) {
+      // Redirect to login page with success message
+      router.push('/auth/login?registered=true');
     }
   };
 
@@ -141,32 +164,53 @@ export default function RegisterPage() {
           id="role"
           name="role"
           value={formData.role}
-          onChange={(e) => setFormData({ ...formData, role: e.target.value as any })}
+          onChange={(e) => setFormData({ ...formData, role: e.target.value as UserRole })}
           className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500"
         >
-          <option value="patient">Patient</option>
-          <option value="doctor">Doctor</option>
-          <option value="hospital_admin">Hospital Administrator</option>
+          <option value={UserRole.PATIENT}>Patient</option>
+          <option value={UserRole.DOCTOR}>Doctor</option>
+          <option value={UserRole.HOSPITAL_ADMIN}>Hospital Administrator</option>
         </select>
       </div>
 
-      <div>
-        <label htmlFor="name" className="block text-sm font-medium text-gray-700">
-          Full Name
-        </label>
-        <input
-          id="name"
-          name="name"
-          type="text"
-          required
-          value={formData.name}
-          onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-          className={`mt-1 block w-full px-3 py-2 border rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 ${
-            errors.name ? 'border-red-300' : 'border-gray-300'
-          }`}
-          placeholder="Enter your full name"
-        />
-        {errors.name && <p className="mt-1 text-sm text-red-600">{errors.name}</p>}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div>
+          <label htmlFor="firstName" className="block text-sm font-medium text-gray-700">
+            First Name
+          </label>
+          <input
+            id="firstName"
+            name="firstName"
+            type="text"
+            required
+            value={formData.firstName}
+            onChange={(e) => setFormData({ ...formData, firstName: e.target.value })}
+            className={`mt-1 block w-full px-3 py-2 border rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 ${
+              errors.firstName ? 'border-red-300' : 'border-gray-300'
+            }`}
+            placeholder="Enter your first name"
+          />
+          {errors.firstName && <p className="mt-1 text-sm text-red-600">{errors.firstName}</p>}
+        </div>
+
+        <div>
+          <label htmlFor="lastName" className="block text-sm font-medium text-gray-700">
+            Last Name
+          </label>
+          <input
+            id="lastName"
+            name="lastName"
+            type="text"
+            required
+            value={formData.lastName}
+            onChange={(e) => setFormData({ ...formData, lastName: e.target.value })}
+            className={`mt-1 block w-full px-3 py-2 border rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 ${
+              errors.lastName ? 'border-red-300' : 'border-gray-300'
+            }`}
+            placeholder="Enter your last name"
+          />
+          {errors.lastName && <p className="mt-1 text-sm text-red-600">{errors.lastName}</p>}
+        </div>
       </div>
 
       <div>
@@ -283,7 +327,7 @@ export default function RegisterPage() {
 
   const renderStep2 = () => (
     <div className="space-y-6">
-      {formData.role === 'patient' && (
+      {formData.role === UserRole.PATIENT && (
         <>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
@@ -408,7 +452,7 @@ export default function RegisterPage() {
         </>
       )}
 
-      {formData.role === 'doctor' && (
+      {formData.role === UserRole.DOCTOR && (
         <>
           <div>
             <label htmlFor="licenseNumber" className="block text-sm font-medium text-gray-700">
@@ -482,20 +526,65 @@ export default function RegisterPage() {
               name="hospitalId"
               value={formData.hospitalId}
               onChange={(e) => setFormData({ ...formData, hospitalId: e.target.value })}
-              className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+              disabled={hospitalsLoading}
+              className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              <option value="">Select hospital</option>
-              <option value="1">General Hospital</option>
-              <option value="2">City Medical Center</option>
-              <option value="3">Regional Health System</option>
+              <option value="">
+                {hospitalsLoading ? 'Loading hospitals...' : 'Select hospital'}
+              </option>
+              {hospitals.map((hospital) => (
+                <option key={hospital.id} value={hospital.id}>
+                  {hospital.name} {hospital.city && `- ${hospital.city}`} {hospital.state && `, ${hospital.state}`}
+                </option>
+              ))}
               <option value="other">Other (will verify later)</option>
             </select>
+            {hospitalsLoading && (
+              <p className="mt-1 text-sm text-blue-600">Loading available hospitals...</p>
+            )}
           </div>
         </>
       )}
 
-      {formData.role === 'hospital_admin' && (
+      {formData.role === UserRole.HOSPITAL_ADMIN && (
         <>
+          <div>
+            <label htmlFor="hospitalSelection" className="block text-sm font-medium text-gray-700">
+              Hospital Selection
+            </label>
+            <select
+              id="hospitalSelection"
+              name="hospitalSelection"
+              value={formData.hospitalId || 'new'}
+              onChange={(e) => setFormData({ 
+                ...formData, 
+                hospitalId: e.target.value === 'new' ? '' : e.target.value 
+              })}
+              disabled={hospitalsLoading}
+              className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              <option value="new">
+                {hospitalsLoading ? 'Loading hospitals...' : 'Create New Hospital'}
+              </option>
+              {hospitals.map((hospital) => (
+                <option key={hospital.id} value={hospital.id}>
+                  Join existing: {hospital.name} {hospital.city && `- ${hospital.city}`} {hospital.state && `, ${hospital.state}`}
+                </option>
+              ))}
+            </select>
+            {hospitalsLoading && (
+              <p className="mt-1 text-sm text-blue-600">Loading available hospitals...</p>
+            )}
+            <p className="mt-1 text-sm text-gray-500">
+              Select "Create New Hospital" to register a new hospital, or choose an existing hospital to join as admin.
+            </p>
+          </div>
+
+          {/* Show hospital creation fields only if "Create New Hospital" is selected */}
+          {(!formData.hospitalId || formData.hospitalId === 'new') && (
+            <>
+              <div className="border-t pt-4">
+                <h4 className="text-md font-medium text-gray-900 mb-4">New Hospital Details</h4>
           <div>
             <label htmlFor="hospitalName" className="block text-sm font-medium text-gray-700">
               Hospital Name
@@ -573,6 +662,9 @@ export default function RegisterPage() {
               {errors.hospitalLicense && <p className="mt-1 text-sm text-red-600">{errors.hospitalLicense}</p>}
             </div>
           </div>
+              </div>
+            </>
+          )}
         </>
       )}
 
@@ -609,7 +701,7 @@ export default function RegisterPage() {
         <h4 className="font-medium text-gray-900 mb-2">Registration Summary</h4>
         <div className="text-sm text-gray-600 space-y-1">
           <p><span className="font-medium">Role:</span> {formData.role.replace('_', ' ').toUpperCase()}</p>
-          <p><span className="font-medium">Name:</span> {formData.name}</p>
+          <p><span className="font-medium">Name:</span> {formData.firstName} {formData.lastName}</p>
           <p><span className="font-medium">Email:</span> {formData.email}</p>
           <p><span className="font-medium">Phone:</span> {formData.phone}</p>
         </div>
@@ -657,9 +749,9 @@ export default function RegisterPage() {
         </div>
       )}
 
-      {errors.submit && (
+      {error && (
         <div className="bg-red-50 border border-red-200 rounded-md p-3">
-          <p className="text-sm text-red-600">{errors.submit}</p>
+          <p className="text-sm text-red-600">{error}</p>
         </div>
       )}
 

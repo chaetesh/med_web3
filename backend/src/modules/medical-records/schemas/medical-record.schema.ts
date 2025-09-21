@@ -87,3 +87,13 @@ export class MedicalRecord extends Document {
 }
 
 export const MedicalRecordSchema = SchemaFactory.createForClass(MedicalRecord);
+
+// Transform _id to id in JSON responses
+MedicalRecordSchema.set('toJSON', {
+  transform: function(doc, ret, options) {
+    ret.id = ret._id;
+    delete ret._id;
+    const { __v, ...cleanRet } = ret;
+    return cleanRet;
+  }
+});

@@ -19,6 +19,7 @@ import {
   IsString,
   IsNotEmpty,
   IsEnum,
+  IsOptional,
   MinLength,
   Matches,
 } from 'class-validator';
@@ -49,6 +50,18 @@ class RegisterDto {
   @IsEnum(UserRole, { message: 'Invalid user role' })
   @IsNotEmpty({ message: 'Role is required' })
   role: UserRole;
+
+  @IsOptional()
+  @IsString({ message: 'Hospital ID must be a string' })
+  hospitalId?: string;
+
+  @IsOptional()
+  @IsString({ message: 'Phone number must be a string' })
+  phone?: string;
+
+  @IsOptional()
+  @IsString({ message: 'License number must be a string' })
+  licenseNumber?: string;
 }
 
 class LoginDto {
@@ -125,6 +138,9 @@ export class AuthController {
         registerDto.firstName,
         registerDto.lastName,
         registerDto.role,
+        registerDto.hospitalId,
+        registerDto.phone,
+        registerDto.licenseNumber,
       );
 
       return {

@@ -1,10 +1,16 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import ProtectedRoute from '@/components/ProtectedRoute';
 import PageHeader from '@/components/PageHeader';
 import { Card, StatCard } from '@/components/Card';
 import Button from '@/components/Button';
+import { 
+  BlockchainApiService, 
+  BlockchainStats, 
+  BlockchainTransaction,
+  ApiErrorClass 
+} from '@/lib/services/blockchain.service';
 import { 
   Database, 
   Activity, 
@@ -20,95 +26,38 @@ import {
   Copy
 } from 'lucide-react';
 
-interface BlockchainStats {
-  totalTransactions: number;
-  pendingTransactions: number;
-  successfulTransactions: number;
-  failedTransactions: number;
-  averageBlockTime: number;
-  networkStatus: 'healthy' | 'congested' | 'degraded';
-  lastBlockHeight: number;
-  gasPrice: number;
-}
-
-interface Transaction {
-  id: string;
-  hash: string;
-  blockNumber: number;
-  timestamp: string;
-  type: 'record_hash' | 'access_grant' | 'revoke_access' | 'user_registration';
-  status: 'confirmed' | 'pending' | 'failed';
-  gasUsed: number;
-  gasPrice: number;
-  fromAddress: string;
-  description: string;
-}
-
 export default function BlockchainStatusPage() {
   const [refreshing, setRefreshing] = useState(false);
+  const [stats, setStats] = useState<BlockchainStats | null>(null);
+  const [recentTransactions, setRecentTransactions] = useState<BlockchainTransaction[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  // Mock data - replace with actual blockchain API calls
-  const stats: BlockchainStats = {
-    totalTransactions: 8765,
-    pendingTransactions: 23,
-    successfulTransactions: 8742,
-    failedTransactions: 23,
-    averageBlockTime: 2.1,
-    networkStatus: 'healthy',
-    lastBlockHeight: 45123678,
-    gasPrice: 20
-  };
+  // Load blockchain data on component mount
+  useEffect(() => {
+    loadBlockchainData();
+  }, []);
 
-  const recentTransactions: Transaction[] = [
-    {
-      id: '1',
-      hash: '0x1234...abcd',
-      blockNumber: 45123678,
-      timestamp: '2024-07-20T10:30:00Z',
-      type: 'record_hash',
-      status: 'confirmed',
-      gasUsed: 21000,
-      gasPrice: 20,
-      fromAddress: '0x9876...5432',
-      description: 'Patient record hash stored for Sarah Johnson'
-    },
-    {
-      id: '2',
-      hash: '0x5678...efgh',
-      blockNumber: 45123677,
-      timestamp: '2024-07-20T10:28:00Z',
-      type: 'access_grant',
-      status: 'confirmed',
-      gasUsed: 45000,
-      gasPrice: 22,
-      fromAddress: '0x1111...2222',
-      description: 'Access granted to Dr. Smith for patient records'
-    },
-    {
-      id: '3',
-      hash: '0x9abc...def0',
-      blockNumber: 0,
-      timestamp: '2024-07-20T10:25:00Z',
-      type: 'record_hash',
-      status: 'pending',
-      gasUsed: 0,
-      gasPrice: 21,
-      fromAddress: '0x3333...4444',
-      description: 'New X-ray record hash submission'
-    },
-    {
-      id: '4',
-      hash: '0xfeda...bc98',
-      blockNumber: 0,
-      timestamp: '2024-07-20T10:20:00Z',
-      type: 'user_registration',
-      status: 'failed',
-      gasUsed: 0,
-      gasPrice: 25,
-      fromAddress: '0x5555...6666',
-      description: 'User registration transaction failed'
+  const loadBlockchainData = async () => {
+    try {
+      setLoading(true);
+      setError(null);
+      
+      // Load stats and transactions in parallel
+      const [statsData, transactionsData] = await Promise.all([
+        BlockchainApiService.getBlockchainStats(),
+        BlockchainApiService.getRecentTransactions(20)
+      ]);
+      
+      setStats(statsData);
+      setRecentTransactions(transactionsData);
+    } catch (error) {
+      console.error('Error loading blockchain data:', error);
+      setError(error instanceof ApiErrorClass ? error.message : 'Failed to load blockchain data');
+    } finally {
+      setLoading(false);
     }
-  ];
+  };
 
   const getStatusColor = (status: string) => {
     switch (status) {
@@ -166,13 +115,45 @@ export default function BlockchainStatusPage() {
 
   const handleRefresh = async () => {
     setRefreshing(true);
-    // Simulate API call
-    setTimeout(() => setRefreshing(false), 2000);
+    await loadBlockchainData();
+    setRefreshing(false);
   };
 
-  const copyToClipboard = (text: string) => {
-    navigator.clipboard.writeText(text);
+  const copyToClipboard = async (text: string) => {
+    const success = await BlockchainApiService.copyToClipboard(text);
+    if (success) {
+      // You could show a toast notification here
+      console.log('Copied to clipboard:', text);
+    }
   };
+
+  if (loading && !stats) {
+    return (
+      <ProtectedRoute allowedRoles={['system_admin']}>
+        <div className="min-h-screen flex items-center justify-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
+        </div>
+      </ProtectedRoute>
+    );
+  }
+
+  if (error && !stats) {
+    return (
+      <ProtectedRoute allowedRoles={['system_admin']}>
+        <div className="min-h-screen flex items-center justify-center">
+          <div className="text-center">
+            <AlertTriangle className="w-12 h-12 text-red-500 mx-auto mb-4" />
+            <h3 className="text-lg font-medium text-gray-900 mb-2">Failed to load blockchain data</h3>
+            <p className="text-red-600 mb-4">{error}</p>
+            <Button onClick={handleRefresh} disabled={refreshing}>
+              <RefreshCw className={`w-4 h-4 mr-2 ${refreshing ? 'animate-spin' : ''}`} />
+              Retry
+            </Button>
+          </div>
+        </div>
+      </ProtectedRoute>
+    );
+  }
 
   return (
     <ProtectedRoute allowedRoles={['system_admin']}>
@@ -202,16 +183,18 @@ export default function BlockchainStatusPage() {
           <div className="flex items-center justify-between">
             <div className="flex items-center space-x-4">
               <div className="flex items-center space-x-2">
-                <Activity className={`w-5 h-5 ${getNetworkStatusColor(stats.networkStatus)}`} />
+                <Activity className={`w-5 h-5 ${stats ? getNetworkStatusColor(stats.networkStatus) : 'text-gray-400'}`} />
                 <span className="text-lg font-semibold">Network Status</span>
               </div>
-              <span className={`text-lg font-bold capitalize ${getNetworkStatusColor(stats.networkStatus)}`}>
-                {stats.networkStatus}
+              <span className={`text-lg font-bold capitalize ${stats ? getNetworkStatusColor(stats.networkStatus) : 'text-gray-400'}`}>
+                {stats ? stats.networkStatus : 'Loading...'}
               </span>
             </div>
             <div className="text-right">
               <div className="text-sm text-gray-500">Latest Block</div>
-              <div className="text-lg font-semibold text-gray-900">#{stats.lastBlockHeight.toLocaleString()}</div>
+              <div className="text-lg font-semibold text-gray-900">
+                #{stats ? stats.lastBlockHeight.toLocaleString() : 'Loading...'}
+              </div>
             </div>
           </div>
         </Card>
@@ -220,25 +203,25 @@ export default function BlockchainStatusPage() {
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
           <StatCard
             title="Total Transactions"
-            value={stats.totalTransactions.toLocaleString()}
+            value={stats ? stats.totalTransactions.toLocaleString() : '0'}
             change={{ value: "+123 today", trend: "up" }}
             icon={<Database className="w-6 h-6 text-blue-600" />}
           />
           <StatCard
             title="Pending Transactions"
-            value={stats.pendingTransactions.toString()}
+            value={stats ? stats.pendingTransactions.toString() : '0'}
             change={{ value: "In mempool", trend: "neutral" }}
             icon={<Clock className="w-6 h-6 text-yellow-600" />}
           />
           <StatCard
             title="Success Rate"
-            value={`${Math.round((stats.successfulTransactions / stats.totalTransactions) * 100)}%`}
+            value={stats ? `${Math.round((stats.successfulTransactions / stats.totalTransactions) * 100)}%` : '0%'}
             change={{ value: "High reliability", trend: "up" }}
             icon={<CheckCircle className="w-6 h-6 text-green-600" />}
           />
           <StatCard
             title="Avg Block Time"
-            value={`${stats.averageBlockTime}s`}
+            value={stats ? `${stats.averageBlockTime}s` : '0s'}
             change={{ value: "Optimal performance", trend: "up" }}
             icon={<TrendingUp className="w-6 h-6 text-purple-600" />}
           />
@@ -258,15 +241,15 @@ export default function BlockchainStatusPage() {
               </div>
               <div className="flex justify-between items-center">
                 <span className="text-sm text-gray-600">Current Gas Price</span>
-                <span className="font-medium">{stats.gasPrice} Gwei</span>
+                <span className="font-medium">{stats ? stats.gasPrice : 0} Gwei</span>
               </div>
               <div className="flex justify-between items-center">
                 <span className="text-sm text-gray-600">Block Height</span>
-                <span className="font-medium">#{stats.lastBlockHeight.toLocaleString()}</span>
+                <span className="font-medium">#{stats ? stats.lastBlockHeight.toLocaleString() : '0'}</span>
               </div>
               <div className="flex justify-between items-center">
                 <span className="text-sm text-gray-600">Average Block Time</span>
-                <span className="font-medium">{stats.averageBlockTime} seconds</span>
+                <span className="font-medium">{stats ? stats.averageBlockTime : 0} seconds</span>
               </div>
             </div>
           </Card>
@@ -328,7 +311,9 @@ export default function BlockchainStatusPage() {
                     <td className="px-6 py-4 whitespace-nowrap">
                       <div className="flex items-center space-x-2">
                         <Hash className="w-4 h-4 text-gray-400" />
-                        <span className="font-mono text-sm text-gray-900">{tx.hash}</span>
+                        <span className="font-mono text-sm text-gray-900">
+                          {BlockchainApiService.formatHash(tx.hash)}
+                        </span>
                         <button 
                           onClick={() => copyToClipboard(tx.hash)}
                           className="text-gray-400 hover:text-gray-600"
@@ -363,10 +348,16 @@ export default function BlockchainStatusPage() {
                       {new Date(tx.timestamp).toLocaleString()}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
-                      <button className="text-blue-600 hover:text-blue-900 mr-3">
+                      <button 
+                        className="text-blue-600 hover:text-blue-900 mr-3"
+                        onClick={() => window.open(BlockchainApiService.getExplorerUrl(tx.hash), '_blank')}
+                      >
                         <ExternalLink className="w-4 h-4" />
                       </button>
-                      <button className="text-gray-600 hover:text-gray-900">
+                      <button 
+                        className="text-gray-600 hover:text-gray-900"
+                        onClick={() => copyToClipboard(tx.hash)}
+                      >
                         <Copy className="w-4 h-4" />
                       </button>
                     </td>
@@ -378,7 +369,7 @@ export default function BlockchainStatusPage() {
         </Card>
 
         {/* Pending Transactions Alert */}
-        {stats.pendingTransactions > 20 && (
+        {stats && stats.pendingTransactions > 20 && (
           <Card className="border-yellow-200 bg-yellow-50">
             <div className="flex items-start">
               <Clock className="w-5 h-5 text-yellow-600 mt-0.5 mr-3" />
@@ -403,14 +394,22 @@ export default function BlockchainStatusPage() {
             <div className="space-y-2">
               <div className="text-sm font-medium text-gray-900">MediChain Registry</div>
               <div className="flex items-center space-x-2">
-                <span className="font-mono text-sm text-gray-600">0x1234...5678</span>
+                <span className="font-mono text-sm text-gray-600">
+                  {stats?.contractAddresses ? 
+                    BlockchainApiService.formatHash(stats.contractAddresses.mediChainRegistry) : 
+                    '0x1234...5678'
+                  }
+                </span>
                 <button 
-                  onClick={() => copyToClipboard('0x1234567890abcdef1234567890abcdef12345678')}
+                  onClick={() => copyToClipboard(stats?.contractAddresses?.mediChainRegistry || '0x1234567890abcdef1234567890abcdef12345678')}
                   className="text-gray-400 hover:text-gray-600"
                 >
                   <Copy className="w-4 h-4" />
                 </button>
-                <button className="text-blue-600 hover:text-blue-800">
+                <button 
+                  className="text-blue-600 hover:text-blue-800"
+                  onClick={() => window.open(BlockchainApiService.getExplorerUrl(stats?.contractAddresses?.mediChainRegistry || '', 'address'), '_blank')}
+                >
                   <ExternalLink className="w-4 h-4" />
                 </button>
               </div>
@@ -418,14 +417,22 @@ export default function BlockchainStatusPage() {
             <div className="space-y-2">
               <div className="text-sm font-medium text-gray-900">Access Control</div>
               <div className="flex items-center space-x-2">
-                <span className="font-mono text-sm text-gray-600">0xabcd...ef01</span>
+                <span className="font-mono text-sm text-gray-600">
+                  {stats?.contractAddresses ? 
+                    BlockchainApiService.formatHash(stats.contractAddresses.accessControl) : 
+                    '0xabcd...ef01'
+                  }
+                </span>
                 <button 
-                  onClick={() => copyToClipboard('0xabcdef0123456789abcdef0123456789abcdef01')}
+                  onClick={() => copyToClipboard(stats?.contractAddresses?.accessControl || '0xabcdef0123456789abcdef0123456789abcdef01')}
                   className="text-gray-400 hover:text-gray-600"
                 >
                   <Copy className="w-4 h-4" />
                 </button>
-                <button className="text-blue-600 hover:text-blue-800">
+                <button 
+                  className="text-blue-600 hover:text-blue-800"
+                  onClick={() => window.open(BlockchainApiService.getExplorerUrl(stats?.contractAddresses?.accessControl || '', 'address'), '_blank')}
+                >
                   <ExternalLink className="w-4 h-4" />
                 </button>
               </div>

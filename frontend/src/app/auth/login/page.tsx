@@ -5,47 +5,30 @@ import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { Eye, EyeOff } from 'lucide-react';
 import { useAuthStore } from '@/store/useAuthStore';
+import { UserRole, LoginFormData } from '@/lib/types/auth.types';
 
 export default function LoginPage() {
-  const [formData, setFormData] = useState({
+  const [formData, setFormData] = useState<LoginFormData>({
     email: '',
     password: '',
-    role: 'patient' as 'patient' | 'doctor' | 'hospital_admin' | 'system_admin'
+    role: UserRole.PATIENT
   });
   const [showPassword, setShowPassword] = useState(false);
-  const [isLoading, setIsLoading] = useState(false);
-  const [error, setError] = useState('');
-
-  const { setUser } = useAuthStore();
+  
+  const { login, isLoading, error } = useAuthStore();
   const router = useRouter();
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setIsLoading(true);
-    setError('');
-
-    try {
-      // Simulate API call
-      await new Promise(resolve => setTimeout(resolve, 1000));
-      
-      // Mock user data - replace with actual API call
-      const mockUser = {
-        id: '1',
-        email: formData.email,
-        name: 'John Doe',
-        role: formData.role,
-        walletAddress: '0x1234...5678',
-        isVerified: true,
-        hospitalId: formData.role === 'doctor' || formData.role === 'hospital_admin' ? '1' : undefined,
-        department: formData.role === 'doctor' ? 'Cardiology' : undefined
-      };
-
-      setUser(mockUser);
+    
+    const result = await login({
+      email: formData.email,
+      password: formData.password,
+    });
+    
+    if (result.success) {
+      // Redirect to unified dashboard - role-based content is shown within the dashboard
       router.push('/dashboard');
-    } catch (err) {
-      setError('Invalid credentials. Please try again.');
-    } finally {
-      setIsLoading(false);
     }
   };
 
@@ -79,13 +62,13 @@ export default function LoginPage() {
                 id="role"
                 name="role"
                 value={formData.role}
-                onChange={(e) => setFormData({ ...formData, role: e.target.value as any })}
+                onChange={(e) => setFormData({ ...formData, role: e.target.value as UserRole })}
                 className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500"
               >
-                <option value="patient">Patient</option>
-                <option value="doctor">Doctor</option>
-                <option value="hospital_admin">Hospital Admin</option>
-                <option value="system_admin">System Admin</option>
+                <option value={UserRole.PATIENT}>Patient</option>
+                <option value={UserRole.DOCTOR}>Doctor</option>
+                <option value={UserRole.HOSPITAL_ADMIN}>Hospital Admin</option>
+                <option value={UserRole.SYSTEM_ADMIN}>System Admin</option>
               </select>
             </div>
 

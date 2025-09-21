@@ -82,6 +82,54 @@ export class HospitalsService {
     };
   }
 
+  async findAllPublic(options: { 
+    page?: number; 
+    limit?: number; 
+    city?: string; 
+    state?: string; 
+    search?: string;
+  }): Promise<{ hospitals: Hospital[]; pagination: any }> {
+    const { page = 1, limit = 50, city, state, search } = options;
+    const skip = (page - 1) * limit;
+    
+    const query: any = { isActive: true };
+    
+    if (city) {
+      query.city = new RegExp(city, 'i');
+    }
+    
+    if (state) {
+      query.state = new RegExp(state, 'i');
+    }
+    
+    if (search) {
+      query.$or = [
+        { name: new RegExp(search, 'i') },
+        { address: new RegExp(search, 'i') },
+        { city: new RegExp(search, 'i') }
+      ];
+    }
+    
+    const hospitals = await this.hospitalModel
+      .find(query)
+      .select('name address city state phone email licenseNumber')
+      .skip(skip)
+      .limit(limit)
+      .exec();
+      
+    const total = await this.hospitalModel.countDocuments(query).exec();
+    
+    return {
+      hospitals,
+      pagination: {
+        total,
+        page,
+        limit,
+        pages: Math.ceil(total / limit)
+      }
+    };
+  }
+
   async updateHospitalProfile(
     hospitalId: string, 
     updateProfileDto: UpdateHospitalProfileDto
@@ -113,6 +161,77 @@ export class HospitalsService {
     const total = await this.usersService.countByQuery(query);
     
     return {
+      doctors,
+      pagination: {
+        total,
+        page,
+        limit,
+        pages: Math.ceil(total / limit)
+      }
+    };
+  }
+
+  async getHospitalDoctorsPublic(
+    hospitalId: string,
+    options: { page?: number; limit?: number; department?: string; specialization?: string; search?: string }
+  ) {
+    const { page = 1, limit = 50, department, specialization, search } = options;
+    const skip = (page - 1) * limit;
+    
+    // First verify hospital exists and is active
+    const hospital = await this.hospitalModel.findOne({ _id: hospitalId, isActive: true });
+    if (!hospital) {
+      throw new NotFoundException(`Hospital with ID ${hospitalId} not found or inactive`);
+    }
+    
+    const query: any = { 
+      role: UserRole.DOCTOR,
+      hospitalId,
+      isActive: true
+    };
+    
+    if (department) {
+      query.department = new RegExp(department, 'i');
+    }
+    
+    if (specialization) {
+      query.specialization = new RegExp(specialization, 'i');
+    }
+    
+    if (search) {
+      query.$or = [
+        { firstName: new RegExp(search, 'i') },
+        { lastName: new RegExp(search, 'i') },
+        { specialization: new RegExp(search, 'i') },
+        { department: new RegExp(search, 'i') }
+      ];
+    }
+    
+    // Get all doctors data but filter sensitive information before returning
+    const allDoctors = await this.usersService.findByQuery(query, skip, limit);
+    const total = await this.usersService.countByQuery(query);
+    
+    // Filter out sensitive information for public access
+    const doctors = allDoctors.map(doctor => ({
+      id: doctor._id,
+      firstName: doctor.firstName,
+      lastName: doctor.lastName,
+      email: doctor.email,
+      specialization: doctor['specialization'] || 'General',
+      department: doctor['department'] || 'General',
+      licenseNumber: doctor['licenseNumber'] || '',
+      yearsOfExperience: doctor['yearsOfExperience'] || 0,
+      qualifications: doctor['qualifications'] || []
+    }));
+    
+    return {
+      hospital: {
+        id: hospital._id,
+        name: hospital.name,
+        address: hospital.address,
+        city: hospital.city,
+        state: hospital.state
+      },
       doctors,
       pagination: {
         total,

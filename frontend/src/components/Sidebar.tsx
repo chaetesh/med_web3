@@ -2,6 +2,8 @@
 
 import { ReactNode } from 'react';
 import { useAuthStore } from '@/store/useAuthStore';
+import type { AuthUser } from '@/store/useAuthStore';
+import { UserRole } from '@/lib/types/auth.types';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { 
@@ -42,7 +44,7 @@ const Sidebar = ({ children }: SidebarProps) => {
     ];
 
     switch (user.role) {
-      case 'system_admin':
+      case UserRole.SYSTEM_ADMIN:
         return [
           ...commonItems,
           { href: '/admin/users', icon: Users, label: 'User Management' },
@@ -53,7 +55,7 @@ const Sidebar = ({ children }: SidebarProps) => {
           { href: '/admin/support', icon: Bell, label: 'Support Tickets' },
         ];
       
-      case 'hospital_admin':
+      case UserRole.HOSPITAL_ADMIN:
         return [
           ...commonItems,
           { href: '/hospital/doctors', icon: Users, label: 'Doctor Management' },
@@ -66,7 +68,7 @@ const Sidebar = ({ children }: SidebarProps) => {
           { href: '/hospital/support', icon: Bell, label: 'Support' },
         ];
       
-      case 'doctor':
+      case UserRole.DOCTOR:
         return [
           ...commonItems,
           { href: '/doctor/search', icon: Search, label: 'Search Patients' },
@@ -76,7 +78,7 @@ const Sidebar = ({ children }: SidebarProps) => {
           { href: '/doctor/profile', icon: Settings, label: 'Profile' },
         ];
       
-      case 'patient':
+      case UserRole.PATIENT:
         return [
           ...commonItems,
           { href: '/patient/appointments', icon: Bell, label: 'Appointments' },
@@ -124,11 +126,11 @@ const Sidebar = ({ children }: SidebarProps) => {
         <div className="flex items-center space-x-3 mb-4">
           <div className="w-8 h-8 bg-gray-300 rounded-full flex items-center justify-center">
             <span className="text-gray-600 font-medium text-sm">
-              {user?.name?.charAt(0)?.toUpperCase()}
+              {user?.firstName?.charAt(0)?.toUpperCase()}{user?.lastName?.charAt(0)?.toUpperCase()}
             </span>
           </div>
           <div>
-            <p className="text-sm font-medium text-gray-900">{user?.name}</p>
+            <p className="text-sm font-medium text-gray-900">{user?.firstName} {user?.lastName}</p>
             <p className="text-xs text-gray-500 capitalize">{user?.role?.replace('_', ' ')}</p>
           </div>
         </div>

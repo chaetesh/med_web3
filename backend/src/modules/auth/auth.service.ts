@@ -87,6 +87,9 @@ export class AuthService {
     firstName: string,
     lastName: string,
     role: string,
+    hospitalId?: string,
+    phone?: string,
+    licenseNumber?: string,
   ): Promise<User> {
     try {
       // Check if password is valid before hashing
@@ -97,15 +100,34 @@ export class AuthService {
       // Hash password
       const hashedPassword = await bcrypt.hash(password, 10);
 
-      // Create user - explicitly omitting walletAddress
-      const user = await this.usersService.create({
+      // Create user data object
+      const userData: any = {
         email,
         password: hashedPassword,
         firstName,
         lastName,
         role: role as any, // Type cast to fix the type error
-        // walletAddress is intentionally not included to avoid any null/undefined value issues
-      });
+        profileData: {},
+      };
+
+      // Add hospitalId if provided and valid
+      if (hospitalId && hospitalId.trim()) {
+        userData.hospitalId = hospitalId;
+      }
+
+      // Add phone to profileData if provided
+      if (phone && phone.trim()) {
+        userData.profileData.phone = phone;
+      }
+
+      // Create user
+      const user = await this.usersService.create(userData);
+
+      // If this is a doctor and license number is provided, log it for future doctor profile creation
+      if (role === 'doctor' && licenseNumber && licenseNumber.trim()) {
+        this.logger.log(`Doctor registered with license: ${licenseNumber} - will need doctor profile creation`);
+        // TODO: Create doctor profile with license number via doctors service
+      }
 
       return user;
     } catch (error) {

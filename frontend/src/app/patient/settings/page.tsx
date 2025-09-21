@@ -1,10 +1,17 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import ProtectedRoute from '@/components/ProtectedRoute';
 import PageHeader from '@/components/PageHeader';
 import { Card, StatCard } from '@/components/Card';
 import Button from '@/components/Button';
+import { useAuthStore } from '@/store/useAuthStore';
+import { 
+  PatientProfileApiService, 
+  PatientProfile, 
+  UpdatePatientProfileDto, 
+  ApiErrorClass 
+} from '@/lib/services/patientProfile.service';
 import { 
   User, 
   Mail, 
@@ -25,7 +32,9 @@ import {
   Smartphone,
   Globe,
   Database,
-  Key
+  Key,
+  Loader2,
+  AlertCircle
 } from 'lucide-react';
 
 interface UserProfile {
@@ -72,28 +81,33 @@ export default function PatientSettingsPage() {
   const [activeTab, setActiveTab] = useState('personal');
   const [editMode, setEditMode] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   
-  // Mock data - replace with actual API calls
+  const { user } = useAuthStore();
+  
+  // Real profile data from API
   const [profile, setProfile] = useState<UserProfile>({
     personalInfo: {
-      firstName: 'John',
-      lastName: 'Smith',
-      email: 'john.smith@email.com',
-      phone: '+1-555-0123',
-      dateOfBirth: '1985-03-15',
+      firstName: '',
+      lastName: '',
+      email: '',
+      phone: '',
+      dateOfBirth: '',
       gender: 'male',
-      address: '123 Main St, City, State 12345',
+      address: '',
       emergencyContact: {
-        name: 'Jane Smith',
-        relationship: 'Spouse',
-        phone: '+1-555-0124'
+        name: '',
+        relationship: '',
+        phone: ''
       }
     },
     medicalInfo: {
       bloodType: 'A+',
-      allergies: ['Penicillin', 'Shellfish'],
-      chronicConditions: ['Hypertension'],
-      medications: ['Lisinopril 10mg']
+      allergies: [],
+      chronicConditions: [],
+      medications: []
     },
     preferences: {
       notifications: {
@@ -107,12 +121,89 @@ export default function PatientSettingsPage() {
         dataRetention: '5years'
       },
       security: {
-        twoFactorAuth: true,
-        biometricAuth: true,
+        twoFactorAuth: false,
+        biometricAuth: false,
         sessionTimeout: '30min'
       }
     }
   });
+
+  // Load profile data on component mount
+  useEffect(() => {
+    loadProfile();
+  }, []);
+
+  const loadProfile = async () => {
+    try {
+      setLoading(true);
+      setError(null);
+      
+      const profileData = await PatientProfileApiService.getMyProfile();
+      const normalizedData = PatientProfileApiService.normalizeProfileData(profileData);
+      
+      setProfile({
+        personalInfo: {
+          firstName: normalizedData.firstName || '',
+          lastName: normalizedData.lastName || '',
+          email: normalizedData.email || '',
+          phone: normalizedData.phone || '',
+          dateOfBirth: normalizedData.dateOfBirth || '',
+          gender: normalizedData.gender || 'male',
+          address: normalizedData.address || '',
+          emergencyContact: normalizedData.emergencyContact || {
+            name: '',
+            relationship: '',
+            phone: ''
+          }
+        },
+        medicalInfo: {
+          bloodType: normalizedData.bloodType || 'A+',
+          allergies: normalizedData.allergies || [],
+          chronicConditions: normalizedData.chronicConditions || [],
+          medications: normalizedData.medications || []
+        },
+        preferences: {
+          notifications: normalizedData.preferences?.notifications || {
+            email: true,
+            sms: false,
+            push: true
+          },
+          privacy: normalizedData.preferences?.privacy || {
+            shareWithResearchers: false,
+            allowEmergencyAccess: true,
+            dataRetention: '5years'
+          },
+          security: normalizedData.preferences?.security || {
+            twoFactorAuth: false,
+            biometricAuth: false,
+            sessionTimeout: '30min'
+          }
+        }
+      });
+    } catch (err) {
+      console.error('Error loading profile:', err);
+      setError(err instanceof ApiErrorClass ? err.message : 'Failed to load profile');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const saveProfile = async () => {
+    try {
+      setSaving(true);
+      setError(null);
+      
+      const updateData = PatientProfileApiService.prepareProfileUpdateData(profile);
+      await PatientProfileApiService.updateMyProfile(updateData);
+      
+      setEditMode(false);
+    } catch (err) {
+      console.error('Error saving profile:', err);
+      setError(err instanceof ApiErrorClass ? err.message : 'Failed to save profile');
+    } finally {
+      setSaving(false);
+    }
+  };
 
   const tabs = [
     { id: 'personal', label: 'Personal Info', icon: User },
@@ -188,21 +279,58 @@ export default function PatientSettingsPage() {
             <Button 
               variant="outline" 
               onClick={() => setEditMode(!editMode)}
+              disabled={loading || saving}
             >
               <Edit className="w-4 h-4 mr-2" />
               {editMode ? 'Cancel' : 'Edit Profile'}
             </Button>
             {editMode && (
-              <Button variant="primary">
-                <Save className="w-4 h-4 mr-2" />
-                Save Changes
+              <Button variant="primary" onClick={saveProfile} disabled={saving}>
+                {saving ? (
+                  <>
+                    <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                    Saving...
+                  </>
+                ) : (
+                  <>
+                    <Save className="w-4 h-4 mr-2" />
+                    Save Changes
+                  </>
+                )}
               </Button>
             )}
           </div>
         </PageHeader>
 
-        {/* Stats */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+        {/* Error Message */}
+        {error && (
+          <Card>
+            <div className="flex items-center p-4 text-red-800 bg-red-100 rounded-lg">
+              <AlertCircle className="w-5 h-5 mr-3" />
+              <span>{error}</span>
+              <Button 
+                variant="outline" 
+                onClick={() => setError(null)}
+                className="ml-auto"
+              >
+                Dismiss
+              </Button>
+            </div>
+          </Card>
+        )}
+
+        {/* Loading State */}
+        {loading ? (
+          <Card>
+            <div className="flex items-center justify-center py-12">
+              <Loader2 className="w-8 h-8 animate-spin text-blue-600 mr-3" />
+              <span className="text-gray-600">Loading profile...</span>
+            </div>
+          </Card>
+        ) : (
+          <>
+            {/* Stats */}
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
           <StatCard
             title="Profile Complete"
             value="95%"
@@ -726,6 +854,8 @@ export default function PatientSettingsPage() {
             )}
           </div>
         </div>
+          </>
+        )}
       </div>
     </ProtectedRoute>
   );
