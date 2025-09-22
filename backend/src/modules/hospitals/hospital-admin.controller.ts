@@ -91,4 +91,58 @@ export class HospitalAdminController {
 
     return this.hospitalsService.getBillingReports(req.user.hospitalId, start, end);
   }
+
+  @Get('bills')
+  @Roles(UserRole.HOSPITAL_ADMIN)
+  async getBills(
+    @Request() req,
+    @Query('page') page?: number,
+    @Query('limit') limit?: number,
+    @Query('status') status?: string,
+    @Query('department') department?: string,
+    @Query('search') search?: string,
+  ) {
+    const options = {
+      page: page ? Number(page) : 1,
+      limit: limit ? Number(limit) : 50,
+      status,
+      department,
+      search
+    };
+    
+    return this.hospitalsService.getBills(req.user.hospitalId, options);
+  }
+
+  @Post('bills')
+  @Roles(UserRole.HOSPITAL_ADMIN)
+  async createBill(@Request() req, @Body() billData: any) {
+    return this.hospitalsService.createBill(req.user.hospitalId, billData);
+  }
+
+  @Get('payments')
+  @Roles(UserRole.HOSPITAL_ADMIN)
+  async getPayments(
+    @Request() req,
+    @Query('page') page?: number,
+    @Query('limit') limit?: number,
+    @Query('method') method?: string,
+    @Query('startDate') startDate?: string,
+    @Query('endDate') endDate?: string,
+  ) {
+    const options = {
+      page: page ? Number(page) : 1,
+      limit: limit ? Number(limit) : 50,
+      method,
+      startDate: startDate ? new Date(startDate) : undefined,
+      endDate: endDate ? new Date(endDate) : undefined
+    };
+    
+    return this.hospitalsService.getPayments(req.user.hospitalId, options);
+  }
+
+  @Post('payments')
+  @Roles(UserRole.HOSPITAL_ADMIN)
+  async recordPayment(@Request() req, @Body() paymentData: any) {
+    return this.hospitalsService.recordPayment(req.user.hospitalId, paymentData);
+  }
 }

@@ -1,5 +1,5 @@
 import { config } from '../config/env';
-import { AuthApiService } from './auth.service';
+import { AuthApiService, ApiErrorClass } from './auth.service';
 import { UserRole } from '../types/auth.types';
 
 // API configuration
@@ -20,6 +20,7 @@ export interface DashboardStats {
   totalUsers?: number;
   blockchainTxns?: number;
   activeHospitals?: number;
+  uptime?: number;
 }
 
 export interface RecentActivity {
@@ -65,7 +66,10 @@ async function dashboardApiRequest<T>(
     const response = await fetch(url, config);
     
     if (!response.ok) {
-      throw new Error(`HTTP error! status: ${response.status}`);
+      throw new ApiErrorClass(
+        `HTTP error! status: ${response.status}`,
+        response.status
+      );
     }
 
     return await response.json() as T;
@@ -93,17 +97,17 @@ export class DashboardApiService {
           return recordDate > weekAgo;
         }).length,
         sharedRecords: records.filter(r => r.sharedWith && r.sharedWith.length > 0).length,
-        walletStatus: 'Connected', // This would come from wallet service
+        walletStatus: 'Connected', // This would come from wallet service later
       };
 
       // Generate recent activity from records
       const recentActivity: RecentActivity[] = records
-        .slice(0, 3)
+        .slice(0, 5)
         .map((record, index) => ({
-          id: record._id,
+          id: record._id || `activity-${index}`,
           type: 'upload' as const,
-          description: `${record.title} uploaded`,
-          timestamp: new Date(record.createdAt),
+          description: `Medical record "${record.title || 'Untitled'}" accessed`,
+          timestamp: new Date(record.lastAccessed || record.createdAt),
           status: 'success' as const,
         }));
 
@@ -128,22 +132,25 @@ export class DashboardApiService {
    */
   static async getDoctorDashboard(): Promise<DashboardData> {
     try {
-      // Get records shared with doctor
-      const sharedRecords = await dashboardApiRequest<any[]>('/medical-records');
-      
+      // Get doctor's patients and shared records
+      const [patients, records] = await Promise.all([
+        dashboardApiRequest<any>('/doctors/patients'),
+        dashboardApiRequest<any[]>('/medical-records')
+      ]);
+
       const stats: DashboardStats = {
-        totalPatients: new Set(sharedRecords.map(r => r.patientId)).size,
-        totalRecords: sharedRecords.length,
-        appointmentsToday: 8, // This would come from appointments API
-        pendingReviews: 3, // This would come from a reviews/tasks API
+        totalPatients: patients?.pagination?.total || patients?.patients?.length || 0,
+        totalRecords: records.length,
+        appointmentsToday: 0, // Placeholder - would come from appointments API
+        pendingReviews: 0, // Placeholder - would come from a reviews/tasks API
       };
 
-      const recentActivity: RecentActivity[] = sharedRecords
-        .slice(0, 3)
-        .map((record) => ({
-          id: record._id,
+      const recentActivity: RecentActivity[] = records
+        .slice(0, 5)
+        .map((record, index) => ({
+          id: record._id || `activity-${index}`,
           type: 'access' as const,
-          description: `Accessed ${record.title}`,
+          description: `Accessed patient record "${record.title || 'Medical Record'}"`,
           timestamp: new Date(record.lastAccessed || record.createdAt),
           status: 'success' as const,
         }));
@@ -166,32 +173,42 @@ export class DashboardApiService {
   /**
    * Get dashboard data for hospital admin
    */
-  static async getHospitalAdminDashboard(hospitalId?: string): Promise<DashboardData> {
+  static async getHospitalAdminDashboard(): Promise<DashboardData> {
     try {
-      // Get hospital doctors
-      const doctors = hospitalId 
-        ? await dashboardApiRequest<any[]>(`/users/hospital/${hospitalId}/doctors`)
-        : [];
+      // Get hospital analytics and doctors
+      const [analytics, doctors, patients] = await Promise.all([
+        dashboardApiRequest<any>('/hospitals/analytics').catch(() => null),
+        dashboardApiRequest<any>('/hospitals/doctors').catch(() => ({ doctors: [] })),
+        dashboardApiRequest<any>('/hospitals/patients').catch(() => ({ patients: [] }))
+      ]);
 
       const stats: DashboardStats = {
-        totalDoctors: doctors.length,
-        totalRecords: 1247, // This would come from aggregated records API
-        dailyAccess: 324, // This would come from access logs API
-        systemHealth: '99.9%',
+        totalDoctors: doctors?.pagination?.total || doctors?.doctors?.length || 0,
+        totalPatients: patients?.pagination?.total || patients?.patients?.length || 0,
+        totalRecords: analytics?.totalRecords || 0,
+        dailyAccess: analytics?.dailyAccess || 0,
+        systemHealth: '99.9%', // Would come from analytics
       };
 
       const recentActivity: RecentActivity[] = [
         {
           id: '1',
           type: 'system',
-          description: 'New doctor registered',
+          description: 'Daily system health check completed',
           timestamp: new Date(Date.now() - 2 * 60 * 60 * 1000),
           status: 'success',
         },
         {
           id: '2',
           type: 'system',
-          description: 'System backup completed',
+          description: 'Hospital analytics updated',
+          timestamp: new Date(Date.now() - 6 * 60 * 60 * 1000),
+          status: 'success',
+        },
+        {
+          id: '3',
+          type: 'system',
+          description: 'Patient records synchronized',
           timestamp: new Date(Date.now() - 24 * 60 * 60 * 1000),
           status: 'success',
         },
@@ -203,6 +220,7 @@ export class DashboardApiService {
       return {
         stats: {
           totalDoctors: 0,
+          totalPatients: 0,
           totalRecords: 0,
           dailyAccess: 0,
           systemHealth: 'Unknown',
@@ -217,28 +235,41 @@ export class DashboardApiService {
    */
   static async getSystemAdminDashboard(): Promise<DashboardData> {
     try {
-      // This would typically call multiple admin endpoints
+      // Get system overview from admin API
+      const [overview, hospitals] = await Promise.all([
+        dashboardApiRequest<any>('/admin/overview'),
+        dashboardApiRequest<any>('/admin/hospitals').catch(() => ({ hospitals: [] }))
+      ]);
+
       const stats: DashboardStats = {
-        totalUsers: 12543,
-        totalRecords: 45321,
-        blockchainTxns: 8765,
-        activeHospitals: 156,
-        systemHealth: '99.9%',
+        totalUsers: overview.users?.total || 0,
+        totalRecords: overview.records?.total || 0,
+        blockchainTxns: 0, // Would come from blockchain service
+        activeHospitals: hospitals?.pagination?.total || hospitals?.hospitals?.length || 0,
+        systemHealth: overview.systemHealth?.status || 'healthy',
+        uptime: overview.systemHealth?.uptime || 0,
       };
 
       const recentActivity: RecentActivity[] = [
         {
           id: '1',
           type: 'system',
-          description: 'System health check completed',
+          description: 'System health monitoring completed',
           timestamp: new Date(Date.now() - 60 * 60 * 1000),
           status: 'success',
         },
         {
           id: '2',
           type: 'system',
-          description: 'New hospital registered',
+          description: 'Database backup completed successfully',
           timestamp: new Date(Date.now() - 3 * 60 * 60 * 1000),
+          status: 'success',
+        },
+        {
+          id: '3',
+          type: 'system',
+          description: 'Blockchain synchronization updated',
+          timestamp: new Date(Date.now() - 6 * 60 * 60 * 1000),
           status: 'success',
         },
       ];
@@ -253,6 +284,7 @@ export class DashboardApiService {
           blockchainTxns: 0,
           activeHospitals: 0,
           systemHealth: 'Unknown',
+          uptime: 0,
         },
         recentActivity: [],
       };
@@ -269,11 +301,30 @@ export class DashboardApiService {
       case UserRole.DOCTOR:
         return this.getDoctorDashboard();
       case UserRole.HOSPITAL_ADMIN:
-        return this.getHospitalAdminDashboard(hospitalId);
+        return this.getHospitalAdminDashboard();
       case UserRole.SYSTEM_ADMIN:
         return this.getSystemAdminDashboard();
       default:
         throw new Error(`Unsupported user role: ${role}`);
+    }
+  }
+
+  /**
+   * Format uptime in human readable format
+   */
+  static formatUptime(seconds: number): string {
+    if (!seconds) return '0m';
+    
+    const days = Math.floor(seconds / 86400);
+    const hours = Math.floor((seconds % 86400) / 3600);
+    const minutes = Math.floor((seconds % 3600) / 60);
+    
+    if (days > 0) {
+      return `${days}d ${hours}h ${minutes}m`;
+    } else if (hours > 0) {
+      return `${hours}h ${minutes}m`;
+    } else {
+      return `${minutes}m`;
     }
   }
 }

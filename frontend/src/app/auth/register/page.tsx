@@ -7,6 +7,7 @@ import { Eye, EyeOff, CheckCircle } from 'lucide-react';
 import { useAuthStore } from '@/store/useAuthStore';
 import { UserRole, RegisterFormData, ValidationErrors } from '@/lib/types/auth.types';
 import { HospitalsApiService } from '@/lib/services/hospitals.service';
+import { HospitalRegistrationService, HospitalRegistrationData } from '@/lib/services/hospital-registration.service';
 
 export default function RegisterPage() {
   const [step, setStep] = useState(1);
@@ -37,8 +38,12 @@ export default function RegisterPage() {
     // Hospital Admin specific
     hospitalName: '',
     hospitalAddress: '',
+    hospitalCity: '',
+    hospitalState: '',
+    hospitalZipCode: '',
     hospitalPhone: '',
     hospitalLicense: '',
+    hospitalWebsite: '',
     
     // Agreement
     agreeToTerms: false,
@@ -111,6 +116,9 @@ export default function RegisterPage() {
       if (!formData.hospitalId || formData.hospitalId === 'new') {
         if (!formData.hospitalName) newErrors.hospitalName = 'Hospital name is required';
         if (!formData.hospitalAddress) newErrors.hospitalAddress = 'Hospital address is required';
+        if (!formData.hospitalCity) newErrors.hospitalCity = 'Hospital city is required';
+        if (!formData.hospitalState) newErrors.hospitalState = 'Hospital state is required';
+        if (!formData.hospitalZipCode) newErrors.hospitalZipCode = 'Hospital ZIP code is required';
         if (!formData.hospitalPhone) newErrors.hospitalPhone = 'Hospital phone is required';
         if (!formData.hospitalLicense) newErrors.hospitalLicense = 'Hospital license is required';
       }
@@ -136,21 +144,79 @@ export default function RegisterPage() {
       return;
     }
 
-    const registerData = {
-      email: formData.email,
-      password: formData.password,
-      firstName: formData.firstName,
-      lastName: formData.lastName,
-      role: formData.role,
-      ...(formData.role === UserRole.DOCTOR && formData.hospitalId && { hospitalId: formData.hospitalId }),
-      ...(formData.role === UserRole.HOSPITAL_ADMIN && formData.hospitalId && { hospitalId: formData.hospitalId }),
-    };
+    try {
+      // If hospital admin is creating a new hospital, register the hospital first
+      let hospitalId = formData.hospitalId;
+      
+      if (formData.role === UserRole.HOSPITAL_ADMIN && (!formData.hospitalId || formData.hospitalId === 'new')) {
+        // Validate required hospital fields
+        if (!formData.hospitalName || !formData.hospitalAddress || !formData.hospitalCity || 
+            !formData.hospitalState || !formData.hospitalZipCode || !formData.hospitalPhone || 
+            !formData.hospitalLicense) {
+          setErrors({ 
+            agreement: 'Hospital information is incomplete. Please fill in all required hospital fields.' 
+          });
+          return;
+        }
 
-    const result = await register(registerData);
-    
-    if (result.success) {
-      // Redirect to login page with success message
-      router.push('/auth/login?registered=true');
+        const hospitalData: HospitalRegistrationData = {
+          name: formData.hospitalName,
+          address: formData.hospitalAddress,
+          city: formData.hospitalCity || '',
+          state: formData.hospitalState || '',
+          zipCode: formData.hospitalZipCode || '',
+          email: formData.email, // Use admin email as hospital contact email
+          phone: formData.hospitalPhone,
+          website: formData.hospitalWebsite || undefined,
+          registrationNumber: formData.hospitalLicense,
+          adminDetails: {
+            firstName: formData.firstName,
+            lastName: formData.lastName,
+            email: formData.email,
+            phone: formData.phone,
+            title: 'Hospital Administrator',
+            password: formData.password  // Add the password field
+          },
+          departments: [], // You may want to add departments field to the form
+          facilities: [], // You may want to add facilities field to the form
+          notes: 'Hospital registered during admin registration process'
+        };
+
+        const hospitalResponse = await HospitalRegistrationService.registerHospital(hospitalData);
+        hospitalId = hospitalResponse.hospitalId;
+        
+        // Hospital registration already creates the admin user account, so redirect to login
+        alert(`Hospital registration submitted successfully! 
+
+Your hospital registration is pending approval by the system administrator. You will receive an email notification once your request is reviewed.
+
+Important: Your account will be activated only after your hospital is approved. You won't be able to log in until the approval process is complete.`);
+        router.push('/auth/login?registered=true&hospital_pending=true');
+        return; // Exit early, don't proceed with user registration
+      }
+
+      // Only register user if NOT a hospital admin creating a new hospital
+      const registerData = {
+        email: formData.email,
+        password: formData.password,
+        firstName: formData.firstName,
+        lastName: formData.lastName,
+        role: formData.role,
+        ...(formData.role === UserRole.DOCTOR && hospitalId && { hospitalId }),
+        ...(formData.role === UserRole.HOSPITAL_ADMIN && hospitalId && { hospitalId }),
+      };
+
+      const result = await register(registerData);
+      
+      if (result.success) {
+        // Normal registration
+        router.push('/auth/login?registered=true');
+      }
+    } catch (error: any) {
+      console.error('Registration error:', error);
+      setErrors({ 
+        agreement: error.message || 'Registration failed. Please try again.' 
+      });
     }
   };
 
@@ -623,6 +689,65 @@ export default function RegisterPage() {
             {errors.hospitalAddress && <p className="mt-1 text-sm text-red-600">{errors.hospitalAddress}</p>}
           </div>
 
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div>
+              <label htmlFor="hospitalCity" className="block text-sm font-medium text-gray-700">
+                City
+              </label>
+              <input
+                id="hospitalCity"
+                name="hospitalCity"
+                type="text"
+                required
+                value={formData.hospitalCity}
+                onChange={(e) => setFormData({ ...formData, hospitalCity: e.target.value })}
+                className={`mt-1 block w-full px-3 py-2 border rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 ${
+                  errors.hospitalCity ? 'border-red-300' : 'border-gray-300'
+                }`}
+                placeholder="City"
+              />
+              {errors.hospitalCity && <p className="mt-1 text-sm text-red-600">{errors.hospitalCity}</p>}
+            </div>
+
+            <div>
+              <label htmlFor="hospitalState" className="block text-sm font-medium text-gray-700">
+                State
+              </label>
+              <input
+                id="hospitalState"
+                name="hospitalState"
+                type="text"
+                required
+                value={formData.hospitalState}
+                onChange={(e) => setFormData({ ...formData, hospitalState: e.target.value })}
+                className={`mt-1 block w-full px-3 py-2 border rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 ${
+                  errors.hospitalState ? 'border-red-300' : 'border-gray-300'
+                }`}
+                placeholder="State"
+              />
+              {errors.hospitalState && <p className="mt-1 text-sm text-red-600">{errors.hospitalState}</p>}
+            </div>
+
+            <div>
+              <label htmlFor="hospitalZipCode" className="block text-sm font-medium text-gray-700">
+                ZIP Code
+              </label>
+              <input
+                id="hospitalZipCode"
+                name="hospitalZipCode"
+                type="text"
+                required
+                value={formData.hospitalZipCode}
+                onChange={(e) => setFormData({ ...formData, hospitalZipCode: e.target.value })}
+                className={`mt-1 block w-full px-3 py-2 border rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 ${
+                  errors.hospitalZipCode ? 'border-red-300' : 'border-gray-300'
+                }`}
+                placeholder="ZIP Code"
+              />
+              {errors.hospitalZipCode && <p className="mt-1 text-sm text-red-600">{errors.hospitalZipCode}</p>}
+            </div>
+          </div>
+
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
               <label htmlFor="hospitalPhone" className="block text-sm font-medium text-gray-700">
@@ -660,6 +785,21 @@ export default function RegisterPage() {
                 placeholder="Hospital license number"
               />
               {errors.hospitalLicense && <p className="mt-1 text-sm text-red-600">{errors.hospitalLicense}</p>}
+            </div>
+
+            <div>
+              <label htmlFor="hospitalWebsite" className="block text-sm font-medium text-gray-700">
+                Website (Optional)
+              </label>
+              <input
+                id="hospitalWebsite"
+                name="hospitalWebsite"
+                type="url"
+                value={formData.hospitalWebsite}
+                onChange={(e) => setFormData({ ...formData, hospitalWebsite: e.target.value })}
+                className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+                placeholder="https://www.hospital.com"
+              />
             </div>
           </div>
               </div>

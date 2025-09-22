@@ -110,8 +110,12 @@ export interface RegisterFormData {
   // Hospital Admin specific
   hospitalName?: string;
   hospitalAddress?: string;
+  hospitalCity?: string;
+  hospitalState?: string;
+  hospitalZipCode?: string;
   hospitalPhone?: string;
   hospitalLicense?: string;
+  hospitalWebsite?: string;
   
   // Agreement
   agreeToTerms: boolean;

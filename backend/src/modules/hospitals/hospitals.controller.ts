@@ -1,10 +1,17 @@
-import { Controller, Get, Query, Param, UseGuards } from '@nestjs/common';
+import { Controller, Get, Post, Query, Param, UseGuards, Body } from '@nestjs/common';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { HospitalsService } from './hospitals.service';
+import { RegisterHospitalDto } from './dto/register-hospital.dto';
 
 @Controller('hospitals')
 export class HospitalsController {
   constructor(private readonly hospitalsService: HospitalsService) {}
+
+  // Public endpoint for hospital registration - no authentication required
+  @Post('register')
+  async registerHospital(@Body() registerHospitalDto: RegisterHospitalDto) {
+    return this.hospitalsService.registerHospitalRequest(registerHospitalDto);
+  }
 
   // Public endpoint for registration - no authentication required
   @Get('public/registration')

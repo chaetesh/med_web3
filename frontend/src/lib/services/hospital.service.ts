@@ -17,7 +17,8 @@ class ApiErrorClass extends Error {
 
 // Generic API request helper
 const apiRequest = async <T>(endpoint: string, options: RequestInit = {}): Promise<T> => {
-  const url = `${API_BASE_URL}${endpoint}`;
+  // Add /api prefix to all endpoints since backend uses global prefix 'api'
+  const url = `${API_BASE_URL}/api${endpoint}`;
   
   const defaultHeaders: Record<string, string> = {
     'Content-Type': 'application/json',
@@ -189,5 +190,61 @@ export class HospitalApiService {
     const endpoint = queryString ? `${this.BASE_URL}/billing-reports?${queryString}` : `${this.BASE_URL}/billing-reports`;
     
     return apiRequest<any>(endpoint);
+  }
+
+  static async getBills(options: {
+    page?: number;
+    limit?: number;
+    status?: string;
+    department?: string;
+    search?: string;
+  } = {}): Promise<any> {
+    const params = new URLSearchParams();
+    
+    if (options.page) params.append('page', options.page.toString());
+    if (options.limit) params.append('limit', options.limit.toString());
+    if (options.status && options.status !== 'all') params.append('status', options.status);
+    if (options.department && options.department !== 'all') params.append('department', options.department);
+    if (options.search) params.append('search', options.search);
+
+    const queryString = params.toString();
+    const endpoint = queryString ? `${this.BASE_URL}/bills?${queryString}` : `${this.BASE_URL}/bills`;
+    
+    return apiRequest<any>(endpoint);
+  }
+
+  static async getPayments(options: {
+    page?: number;
+    limit?: number;
+    method?: string;
+    startDate?: Date;
+    endDate?: Date;
+  } = {}): Promise<any> {
+    const params = new URLSearchParams();
+    
+    if (options.page) params.append('page', options.page.toString());
+    if (options.limit) params.append('limit', options.limit.toString());
+    if (options.method && options.method !== 'all') params.append('method', options.method);
+    if (options.startDate) params.append('startDate', options.startDate.toISOString());
+    if (options.endDate) params.append('endDate', options.endDate.toISOString());
+
+    const queryString = params.toString();
+    const endpoint = queryString ? `${this.BASE_URL}/payments?${queryString}` : `${this.BASE_URL}/payments`;
+    
+    return apiRequest<any>(endpoint);
+  }
+
+  static async createBill(billData: any): Promise<any> {
+    return apiRequest<any>(`${this.BASE_URL}/bills`, {
+      method: 'POST',
+      body: JSON.stringify(billData),
+    });
+  }
+
+  static async recordPayment(paymentData: any): Promise<any> {
+    return apiRequest<any>(`${this.BASE_URL}/payments`, {
+      method: 'POST',
+      body: JSON.stringify(paymentData),
+    });
   }
 }

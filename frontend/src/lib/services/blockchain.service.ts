@@ -37,6 +37,7 @@ export interface BlockchainTransaction {
   recordId?: string;
   userId?: string;
   errorMessage?: string;
+  amount?: string; // Add amount field for display
 }
 
 export interface NetworkInfo {
@@ -114,85 +115,39 @@ async function apiRequest<T>(
 // Blockchain API service
 export class BlockchainApiService {
   /**
-   * Get blockchain network statistics
+   * Get blockchain network statistics (using admin endpoint)
    */
   static async getBlockchainStats(): Promise<BlockchainStats> {
-    try {
-      return await apiRequest<BlockchainStats>('/blockchain/stats', {
-        method: 'GET',
-      });
-    } catch (error) {
-      // Return mock data if API is not available
-      console.warn('Blockchain API not available, using mock data:', error);
-      return {
-        totalTransactions: 8765,
-        pendingTransactions: 23,
-        successfulTransactions: 8742,
-        failedTransactions: 23,
-        averageBlockTime: 2.1,
-        networkStatus: 'healthy',
-        lastBlockHeight: 45123678,
-        gasPrice: 20,
-        networkName: 'Polygon',
-        chainId: 137,
-        contractAddresses: {
-          mediChainRegistry: '0x1234567890abcdef1234567890abcdef12345678',
-          accessControl: '0xabcdef0123456789abcdef0123456789abcdef01'
-        }
-      };
-    }
+    // Use the admin blockchain status endpoint
+    const adminStatus = await apiRequest<any>('/admin/blockchain/status', {
+      method: 'GET',
+    });
+
+    // Transform the admin response to match BlockchainStats interface
+    return {
+      totalTransactions: adminStatus.transactions?.month || 0,
+      pendingTransactions: adminStatus.transactions?.pending || 0,
+      successfulTransactions: (adminStatus.transactions?.month || 0) - (adminStatus.transactions?.failed || 0),
+      failedTransactions: adminStatus.transactions?.failed || 0,
+      averageBlockTime: 2.1, // Default for Polygon
+      networkStatus: adminStatus.network?.rpcStatus === 'connected' ? 'healthy' : 'degraded',
+      lastBlockHeight: adminStatus.network?.latestBlock || 0,
+      gasPrice: parseInt(adminStatus.network?.gasPrice?.replace(' gwei', '') || '0'),
+      networkName: adminStatus.network?.name || 'Polygon',
+      chainId: parseInt(adminStatus.network?.chainId || '137'),
+      contractAddresses: {
+        mediChainRegistry: adminStatus.contract?.address || '0x0303B82244eBDaB045E336314770b13f652BE284',
+        accessControl: adminStatus.contract?.address || '0x0303B82244eBDaB045E336314770b13f652BE284'
+      }
+    };
   }
 
   /**
-   * Get recent blockchain transactions
+   * Get recent blockchain transactions (not available in admin endpoint)
    */
   static async getRecentTransactions(limit: number = 10): Promise<BlockchainTransaction[]> {
-    try {
-      return await apiRequest<BlockchainTransaction[]>(`/blockchain/transactions?limit=${limit}`, {
-        method: 'GET',
-      });
-    } catch (error) {
-      // Return mock data if API is not available
-      console.warn('Blockchain transactions API not available, using mock data:', error);
-      return [
-        {
-          id: '1',
-          hash: '0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef',
-          blockNumber: 45123678,
-          timestamp: new Date(Date.now() - 5 * 60 * 1000).toISOString(),
-          type: 'record_hash',
-          status: 'confirmed',
-          gasUsed: 21000,
-          gasPrice: 20,
-          fromAddress: '0x9876543210fedcba9876543210fedcba98765432',
-          description: 'Patient record hash stored on blockchain'
-        },
-        {
-          id: '2',
-          hash: '0x5678901234567890abcdef1234567890abcdef1234567890abcdef1234567890',
-          blockNumber: 45123677,
-          timestamp: new Date(Date.now() - 10 * 60 * 1000).toISOString(),
-          type: 'access_grant',
-          status: 'confirmed',
-          gasUsed: 45000,
-          gasPrice: 22,
-          fromAddress: '0x1111222233334444555566667777888899990000',
-          description: 'Access granted to doctor for patient records'
-        },
-        {
-          id: '3',
-          hash: '0x9abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789',
-          blockNumber: 0,
-          timestamp: new Date(Date.now() - 2 * 60 * 1000).toISOString(),
-          type: 'record_hash',
-          status: 'pending',
-          gasUsed: 0,
-          gasPrice: 21,
-          fromAddress: '0x3333444455556666777788889999aaaabbbbcccc',
-          description: 'New medical record hash submission pending'
-        }
-      ];
-    }
+    // Admin endpoint doesn't provide recent transactions, return empty array
+    return [];
   }
 
   /**
@@ -208,55 +163,40 @@ export class BlockchainApiService {
    * Get network information
    */
   static async getNetworkInfo(): Promise<NetworkInfo> {
-    try {
-      return await apiRequest<NetworkInfo>('/blockchain/network', {
-        method: 'GET',
-      });
-    } catch (error) {
-      // Return mock data if API is not available
-      console.warn('Network info API not available, using mock data:', error);
-      return {
-        chainId: 137,
-        networkName: 'Polygon Mainnet',
-        rpcUrl: 'https://polygon-rpc.com',
-        blockExplorerUrl: 'https://polygonscan.com',
-        nativeCurrency: {
-          name: 'MATIC',
-          symbol: 'MATIC',
-          decimals: 18
-        }
-      };
-    }
+    const adminStatus = await apiRequest<any>('/admin/blockchain/status', {
+      method: 'GET',
+    });
+
+    return {
+      chainId: parseInt(adminStatus.network?.chainId || '137'),
+      networkName: adminStatus.network?.name || 'Polygon',
+      rpcUrl: 'https://polygon-rpc.com', // Not provided in admin endpoint
+      blockExplorerUrl: 'https://polygonscan.com', // Not provided in admin endpoint
+      nativeCurrency: {
+        name: 'MATIC',
+        symbol: 'MATIC',
+        decimals: 18
+      }
+    };
   }
 
   /**
    * Get contract information
    */
   static async getContractInfo(): Promise<ContractInfo[]> {
-    try {
-      return await apiRequest<ContractInfo[]>('/blockchain/contracts', {
-        method: 'GET',
-      });
-    } catch (error) {
-      // Return mock data if API is not available
-      console.warn('Contract info API not available, using mock data:', error);
-      return [
-        {
-          address: '0x1234567890abcdef1234567890abcdef12345678',
-          name: 'MediChain Registry',
-          deployedAt: '2024-01-15T10:30:00Z',
-          version: '1.0.0',
-          verified: true
-        },
-        {
-          address: '0xabcdef0123456789abcdef0123456789abcdef01',
-          name: 'Access Control',
-          deployedAt: '2024-01-15T10:35:00Z',
-          version: '1.0.0',
-          verified: true
-        }
-      ];
-    }
+    const adminStatus = await apiRequest<any>('/admin/blockchain/status', {
+      method: 'GET',
+    });
+
+    return [
+      {
+        address: adminStatus.contract?.address || '0x0303B82244eBDaB045E336314770b13f652BE284',
+        name: adminStatus.contract?.name || 'MediChain',
+        deployedAt: adminStatus.contract?.deployedAt || '2024-01-01T00:00:00.000Z',
+        version: '1.0.0',
+        verified: true
+      }
+    ];
   }
 
   /**
@@ -276,7 +216,7 @@ export class BlockchainApiService {
   }
 
   /**
-   * Get transaction statistics by type
+   * Get transaction statistics by type (not available in admin endpoint)
    */
   static async getTransactionStats(): Promise<{
     [key: string]: {
@@ -286,27 +226,25 @@ export class BlockchainApiService {
       pending: number;
     }
   }> {
-    try {
-      return await apiRequest<{
-        [key: string]: {
-          total: number;
-          successful: number;
-          failed: number;
-          pending: number;
-        }
-      }>('/blockchain/transaction-stats', {
-        method: 'GET',
-      });
-    } catch (error) {
-      // Return mock data if API is not available
-      console.warn('Transaction stats API not available, using mock data:', error);
-      return {
-        record_hash: { total: 6234, successful: 6200, failed: 34, pending: 0 },
-        access_grant: { total: 1567, successful: 1555, failed: 12, pending: 0 },
-        revoke_access: { total: 432, successful: 430, failed: 2, pending: 0 },
-        user_registration: { total: 532, successful: 525, failed: 7, pending: 0 }
-      };
-    }
+    const adminStatus = await apiRequest<any>('/admin/blockchain/status', {
+      method: 'GET',
+    });
+
+    // Use the available transaction data from admin endpoint
+    const totalTransactions = adminStatus.transactions?.month || 0;
+    const failedTransactions = adminStatus.transactions?.failed || 0;
+    const pendingTransactions = adminStatus.transactions?.pending || 0;
+    const successfulTransactions = totalTransactions - failedTransactions;
+
+    // Return simplified stats based on available data
+    return {
+      all_transactions: { 
+        total: totalTransactions, 
+        successful: successfulTransactions, 
+        failed: failedTransactions, 
+        pending: pendingTransactions 
+      }
+    };
   }
 
   /**
@@ -319,27 +257,17 @@ export class BlockchainApiService {
     syncStatus: 'synced' | 'syncing' | 'behind';
     issues: string[];
   }> {
-    try {
-      return await apiRequest<{
-        status: 'healthy' | 'degraded' | 'down';
-        responseTime: number;
-        lastBlockTime: number;
-        syncStatus: 'synced' | 'syncing' | 'behind';
-        issues: string[];
-      }>('/blockchain/health', {
-        method: 'GET',
-      });
-    } catch (error) {
-      // Return mock data if API is not available
-      console.warn('Health status API not available, using mock data:', error);
-      return {
-        status: 'healthy',
-        responseTime: 245,
-        lastBlockTime: 2.1,
-        syncStatus: 'synced',
-        issues: []
-      };
-    }
+    const adminStatus = await apiRequest<any>('/admin/blockchain/status', {
+      method: 'GET',
+    });
+
+    return {
+      status: adminStatus.network?.rpcStatus === 'connected' ? 'healthy' : 'down',
+      responseTime: 0, // Not provided in admin endpoint
+      lastBlockTime: 2.1, // Default for Polygon
+      syncStatus: adminStatus.network?.syncStatus === 'synced' ? 'synced' : 'behind',
+      issues: []
+    };
   }
 
   /**
@@ -367,6 +295,52 @@ export class BlockchainApiService {
       default:
         return `${baseUrl}/tx/${hash}`;
     }
+  }
+
+  /**
+   * Get all wallet transactions from admin endpoint
+   */
+  static async getAllWalletTransactions(options: {
+    page?: number;
+    limit?: number;
+    userRole?: string;
+    walletAddress?: string;
+  } = {}): Promise<{
+    total: number;
+    page: number;
+    limit: number;
+    totalPages: number;
+    transactions: any[];
+    summary: any;
+  }> {
+    const params = new URLSearchParams();
+    if (options.page) params.append('page', options.page.toString());
+    if (options.limit) params.append('limit', options.limit.toString());
+    if (options.userRole) params.append('userRole', options.userRole);
+    if (options.walletAddress) params.append('walletAddress', options.walletAddress);
+
+    const queryString = params.toString();
+    const endpoint = `/admin/blockchain/transactions${queryString ? `?${queryString}` : ''}`;
+
+    return apiRequest<{
+      total: number;
+      page: number;
+      limit: number;
+      totalPages: number;
+      transactions: any[];
+      summary: any;
+    }>(endpoint, {
+      method: 'GET',
+    });
+  }
+
+  /**
+   * Get blockchain status from admin endpoint
+   */
+  static async getAdminBlockchainStatus(): Promise<any> {
+    return apiRequest<any>('/admin/blockchain/status', {
+      method: 'GET',
+    });
   }
 
   /**

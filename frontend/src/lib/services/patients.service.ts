@@ -130,6 +130,38 @@ async function apiRequest<T>(
 // Patients API service
 export class PatientsApiService {
   /**
+   * Get hospital's patients (for hospital admins)
+   */
+  static async getHospitalPatients(options: {
+    page?: number;
+    limit?: number;
+    doctorId?: string;
+    search?: string;
+  } = {}): Promise<PatientsResponse> {
+    const searchParams = new URLSearchParams();
+    
+    if (options.page) {
+      searchParams.append('page', options.page.toString());
+    }
+    if (options.limit) {
+      searchParams.append('limit', options.limit.toString());
+    }
+    if (options.doctorId) {
+      searchParams.append('doctorId', options.doctorId);
+    }
+    if (options.search) {
+      searchParams.append('search', options.search);
+    }
+
+    const queryString = searchParams.toString();
+    const endpoint = `/hospitals/patients${queryString ? `?${queryString}` : ''}`;
+    
+    return apiRequest<PatientsResponse>(endpoint, {
+      method: 'GET',
+    });
+  }
+
+  /**
    * Get doctor's patients (for doctors only)
    */
   static async getDoctorPatients(options: {

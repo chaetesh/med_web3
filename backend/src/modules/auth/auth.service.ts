@@ -21,6 +21,12 @@ export class AuthService {
         return null;
       }
 
+      // Check if user account is active
+      if (!user.isActive) {
+        this.logger.warn(`Login attempt for inactive user: ${email}`);
+        return null;
+      }
+
       const isPasswordValid = await bcrypt.compare(password, user.password);
 
       if (!isPasswordValid) {

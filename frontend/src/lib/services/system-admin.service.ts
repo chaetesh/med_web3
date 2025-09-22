@@ -51,6 +51,56 @@ export interface Hospital {
   updatedAt: string;
 }
 
+export interface AdminHospital {
+  _id: string;
+  name: string;
+  address: string;
+  city: string;
+  email: string;
+  phone: string;
+  status: 'approved' | 'pending' | 'rejected' | 'suspended';
+  adminName: string;
+  registeredAt: string;
+  totalDoctors: number;
+  totalPatients: number;
+  monthlyRecords: number;
+}
+
+export interface AdminHospitalDetail {
+  _id: string;
+  name: string;
+  address: string;
+  city: string;
+  state: string;
+  zip: string;
+  email: string;
+  phone: string;
+  website?: string;
+  status: 'approved' | 'pending' | 'rejected' | 'suspended';
+  registrationNumber: string;
+  registeredAt: string;
+  adminDetails: {
+    userId: string;
+    firstName: string;
+    lastName: string;
+    email: string;
+    phone?: string;
+    title?: string;
+  };
+  departments: string[];
+  facilities: string[];
+  metrics: {
+    totalDoctors: number;
+    totalPatients: number;
+    monthlyRecords: number;
+    activeAppointments: number;
+  };
+  walletAddress?: string;
+  blockchainVerified: boolean;
+  notes?: string;
+  lastUpdated: string;
+}
+
 export interface SystemLog {
   _id: string;
   level: 'info' | 'warn' | 'error' | 'debug';
@@ -138,13 +188,15 @@ export class SystemAdminApiService {
     page?: number;
     limit?: number;
     role?: string;
-    status?: string;
-    search?: string;
+    searchTerm?: string; // Changed from 'search' to 'searchTerm' to match backend
   } = {}): Promise<{
     users: User[];
-    total: number;
-    page: number;
-    limit: number;
+    pagination: {
+      total: number;
+      page: number;
+      limit: number;
+      pages: number;
+    };
   }> {
     const searchParams = new URLSearchParams();
     Object.entries(params).forEach(([key, value]) => {
@@ -158,16 +210,30 @@ export class SystemAdminApiService {
     
     return apiRequest<{
       users: User[];
-      total: number;
-      page: number;
-      limit: number;
+      pagination: {
+        total: number;
+        page: number;
+        limit: number;
+        pages: number;
+      };
     }>(endpoint, {
       method: 'GET',
     });
   }
 
   /**
-   * Get all hospitals with pagination and filtering
+   * Update user status (activate/deactivate) 
+   */
+  static async updateUserStatus(userId: string, status: 'active' | 'inactive'): Promise<{ message: string }> {
+    const action = status === 'active' ? 'activate' : 'deactivate';
+    return apiRequest<{ message: string }>(`/admin/users/${userId}/status`, {
+      method: 'PUT',
+      body: JSON.stringify({ status }),
+    });
+  }
+
+  /**
+   * Get all hospitals with pagination and filtering (System Admin)
    */
   static async getHospitals(params: {
     page?: number;
@@ -175,7 +241,7 @@ export class SystemAdminApiService {
     status?: string;
     search?: string;
   } = {}): Promise<{
-    hospitals: Hospital[];
+    hospitals: AdminHospital[];
     total: number;
     page: number;
     limit: number;
@@ -191,7 +257,7 @@ export class SystemAdminApiService {
     const endpoint = `/admin/hospitals${queryString ? `?${queryString}` : ''}`;
     
     return apiRequest<{
-      hospitals: Hospital[];
+      hospitals: AdminHospital[];
       total: number;
       page: number;
       limit: number;
@@ -201,20 +267,108 @@ export class SystemAdminApiService {
   }
 
   /**
-   * Activate/Deactivate a user
+   * Register a new hospital
    */
-  static async updateUserStatus(userId: string, isActive: boolean): Promise<{ message: string }> {
-    return apiRequest<{ message: string }>(`/users/${userId}/${isActive ? 'activate' : 'deactivate'}`, {
-      method: 'PUT',
+  static async registerHospital(hospitalData: {
+    name: string;
+    address: string;
+    city: string;
+    state: string;
+    zip: string;
+    email: string;
+    phone: string;
+    website?: string;
+    registrationNumber: string;
+    adminDetails: {
+      firstName: string;
+      lastName: string;
+      email: string;
+      phone?: string;
+      title?: string;
+    };
+    departments: string[];
+    facilities: string[];
+  }): Promise<{
+    message: string;
+    hospitalId: string;
+    adminAccount: {
+      userId: string;
+      email: string;
+      temporaryPassword: string;
+    };
+    status: string;
+  }> {
+    return apiRequest<{
+      message: string;
+      hospitalId: string;
+      adminAccount: {
+        userId: string;
+        email: string;
+        temporaryPassword: string;
+      };
+      status: string;
+    }>('/admin/hospitals', {
+      method: 'POST',
+      body: JSON.stringify(hospitalData),
     });
   }
 
   /**
-   * Delete a user (soft delete)
+   * Update hospital status (approve/reject/suspend)
    */
-  static async deleteUser(userId: string): Promise<{ message: string }> {
-    return apiRequest<{ message: string }>(`/users/${userId}`, {
-      method: 'DELETE',
+  static async updateHospitalStatus(
+    hospitalId: string, 
+    status: 'approved' | 'rejected' | 'suspended', 
+    notes: string
+  ): Promise<{
+    message: string;
+    hospitalId: string;
+    status: string;
+  }> {
+    return apiRequest<{
+      message: string;
+      hospitalId: string;
+      status: string;
+    }>(`/admin/hospitals/${hospitalId}/status`, {
+      method: 'PUT',
+      body: JSON.stringify({ status, notes }),
+    });
+  }
+
+  /**
+   * Get detailed hospital information
+   */
+  static async getHospitalDetails(hospitalId: string): Promise<AdminHospitalDetail> {
+    return apiRequest<AdminHospitalDetail>(`/admin/hospitals/${hospitalId}`, {
+      method: 'GET',
+    });
+  }
+
+  /**
+   * Update hospital information
+   */
+  static async updateHospitalInfo(hospitalId: string, hospitalData: {
+    name?: string;
+    address?: string;
+    city?: string;
+    state?: string;
+    zip?: string;
+    email?: string;
+    phone?: string;
+    website?: string;
+    departments?: string[];
+    facilities?: string[];
+    notes?: string;
+  }): Promise<{
+    message: string;
+    hospitalId: string;
+  }> {
+    return apiRequest<{
+      message: string;
+      hospitalId: string;
+    }>(`/admin/hospitals/${hospitalId}`, {
+      method: 'PUT',
+      body: JSON.stringify(hospitalData),
     });
   }
 
@@ -245,15 +399,6 @@ export class SystemAdminApiService {
     return apiRequest<Hospital>(`/admin/hospitals/${hospitalId}`, {
       method: 'PUT',
       body: JSON.stringify(hospitalData),
-    });
-  }
-
-  /**
-   * Activate/Deactivate a hospital
-   */
-  static async updateHospitalStatus(hospitalId: string, isActive: boolean): Promise<{ message: string }> {
-    return apiRequest<{ message: string }>(`/admin/hospitals/${hospitalId}/${isActive ? 'activate' : 'deactivate'}`, {
-      method: 'PUT',
     });
   }
 

@@ -9,6 +9,13 @@ export enum SubscriptionPlan {
   ENTERPRISE = 'enterprise',
 }
 
+export enum HospitalStatus {
+  PENDING = 'pending',
+  APPROVED = 'approved',
+  REJECTED = 'rejected',
+  SUSPENDED = 'suspended',
+}
+
 @Schema({ timestamps: true })
 export class Hospital extends Document {
   @Prop({ required: true })
@@ -35,8 +42,54 @@ export class Hospital extends Document {
   @Prop({ required: true, unique: true })
   email: string;
 
+  @Prop()
+  website: string;
+
   @Prop({ required: true })
   licenseNumber: string;
+
+  @Prop()
+  registrationNumber: string;
+
+  @Prop({
+    type: String,
+    enum: HospitalStatus,
+    default: HospitalStatus.PENDING,
+  })
+  status: HospitalStatus;
+
+  @Prop()
+  notes: string;
+
+  @Prop({ type: Object })
+  adminDetails: {
+    userId?: string;
+    firstName: string;
+    lastName: string;
+    email: string;
+    phone?: string;
+    title?: string;
+  };
+
+  @Prop({ type: [String], default: [] })
+  departments: string[];
+
+  @Prop({ type: [String], default: [] })
+  facilities: string[];
+
+  @Prop({ type: Object, default: {} })
+  metrics: {
+    totalDoctors?: number;
+    totalPatients?: number;
+    monthlyRecords?: number;
+    activeAppointments?: number;
+  };
+
+  @Prop()
+  walletAddress: string;
+
+  @Prop({ type: Boolean, default: false })
+  blockchainVerified: boolean;
 
   @Prop({
     type: String,
@@ -48,7 +101,7 @@ export class Hospital extends Document {
   @Prop({ type: Date })
   subscriptionExpiryDate: Date;
 
-  @Prop({ type: Boolean, default: true })
+  @Prop({ type: Boolean, default: false })
   isActive: boolean;
 
   @Prop({ type: Object, default: {} })
