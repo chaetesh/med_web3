@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import ProtectedRoute from '@/components/ProtectedRoute';
 import PageHeader from '@/components/PageHeader';
 import { Card, StatCard } from '@/components/Card';
@@ -19,108 +19,116 @@ import {
   CheckCircle,
   Search
 } from 'lucide-react';
-
-interface AuditLog {
-  id: string;
-  timestamp: string;
-  userId: string;
-  userName: string;
-  userRole: string;
-  action: 'view' | 'upload' | 'share' | 'download' | 'delete' | 'modify';
-  resourceType: 'patient_record' | 'user_account' | 'hospital_data' | 'system_config';
-  resourceId: string;
-  resourceName: string;
-  ipAddress: string;
-  location: string;
-  success: boolean;
-  details?: string;
-}
+import { AuditLog } from '@/lib/types';
+import { AuditLogsApiService, AuditLogFilters } from '@/lib/services/audit-logs.service';
 
 export default function AuditPage() {
+  const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [totalLogs, setTotalLogs] = useState(0);
+  const [currentPage, setCurrentPage] = useState(1);
+  
+  // Filter states
   const [searchTerm, setSearchTerm] = useState('');
   const [actionFilter, setActionFilter] = useState('all');
   const [dateRange, setDateRange] = useState('7days');
   const [userRoleFilter, setUserRoleFilter] = useState('all');
 
-  // Mock data - replace with actual API calls
-  const auditLogs: AuditLog[] = [
-    {
-      id: '1',
-      timestamp: '2024-07-20T10:30:00Z',
-      userId: 'dr001',
-      userName: 'Dr. John Smith',
-      userRole: 'doctor',
-      action: 'view',
-      resourceType: 'patient_record',
-      resourceId: 'patient_123',
-      resourceName: 'Sarah Johnson - Medical Record',
-      ipAddress: '192.168.1.100',
-      location: 'New York, NY',
-      success: true,
-      details: 'Accessed patient record for consultation'
-    },
-    {
-      id: '2',
-      timestamp: '2024-07-20T09:15:00Z',
-      userId: 'patient456',
-      userName: 'Michael Chen',
-      userRole: 'patient',
-      action: 'upload',
-      resourceType: 'patient_record',
-      resourceId: 'record_789',
-      resourceName: 'Blood Test Results',
-      ipAddress: '203.0.113.45',
-      location: 'San Francisco, CA',
-      success: true,
-      details: 'Uploaded new blood test results'
-    },
-    {
-      id: '3',
-      timestamp: '2024-07-20T08:45:00Z',
-      userId: 'admin_001',
-      userName: 'System Administrator',
-      userRole: 'system_admin',
-      action: 'modify',
-      resourceType: 'system_config',
-      resourceId: 'ai_config_001',
-      resourceName: 'AI Processing Settings',
-      ipAddress: '10.0.0.50',
-      location: 'Internal Network',
-      success: true,
-      details: 'Updated AI summary generation settings'
-    },
-    {
-      id: '4',
-      timestamp: '2024-07-20T07:20:00Z',
-      userId: 'dr002',
-      userName: 'Dr. Emily Parker',
-      userRole: 'doctor',
-      action: 'share',
-      resourceType: 'patient_record',
-      resourceId: 'patient_456',
-      resourceName: 'X-Ray Results - James Wilson',
-      ipAddress: '192.168.1.101',
-      location: 'Chicago, IL',
-      success: false,
-      details: 'Failed to share - insufficient permissions'
-    },
-    {
-      id: '5',
-      timestamp: '2024-07-19T16:30:00Z',
-      userId: 'hospital_admin_01',
-      userName: 'Hospital Admin - City General',
-      userRole: 'hospital_admin',
-      action: 'view',
-      resourceType: 'hospital_data',
-      resourceId: 'hospital_stats_001',
-      resourceName: 'Monthly Usage Report',
-      ipAddress: '172.16.0.10',
-      location: 'Boston, MA',
-      success: true,
-      details: 'Generated monthly hospital usage report'
-    }
-  ];
+  // Stats state
+  const [stats, setStats] = useState({
+    totalActions: 0,
+    successfulActions: 0,
+    failedActions: 0,
+    todayActions: 0
+  });
 
+  // Load audit logs from API
+  const loadAuditLogs = async (filters: AuditLogFilters = {}) => {
+    try {
+      setLoading(true);
+      setError(null);
+
+      // Calculate date range
+      let startDate: Date | undefined;
+      if (dateRange !== 'all') {
+        const days = dateRange === '1day' ? 1 : dateRange === '7days' ? 7 : dateRange === '30days' ? 30 : 90;
+        startDate = new Date();
+        startDate.setDate(startDate.getDate() - days);
+      }
+
+      const apiFilters: AuditLogFilters = {
+        page: currentPage,
+        limit: 50,
+        startDate,
+        action: actionFilter !== 'all' ? actionFilter : undefined,
+        userRole: userRoleFilter !== 'all' ? userRoleFilter : undefined,
+        ...filters
+      };
+
+      const response = await AuditLogsApiService.getAuditLogs(apiFilters);
+      setAuditLogs(response.logs);
+      setTotalLogs(response.total);
+
+      // Calculate stats
+      const today = new Date().toDateString();
+      const todayLogs = response.logs.filter(log => 
+        new Date(log.timestamp).toDateString() === today
+      );
+      
+      setStats({
+        totalActions: response.total,
+        successfulActions: response.logs.filter(log => log.success).length,
+        failedActions: response.logs.filter(log => !log.success).length,
+        todayActions: todayLogs.length
+      });
+
+    } catch (err) {
+      console.error('Error loading audit logs:', err);
+      setError(err instanceof Error ? err.message : 'Failed to load audit logs');
+      setAuditLogs([]);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Load logs on component mount and when filters change
+  useEffect(() => {
+    loadAuditLogs();
+  }, [currentPage, actionFilter, dateRange, userRoleFilter]);
+
+  // Export audit logs
+  const handleExportLogs = async () => {
+    try {
+      const startDate = dateRange !== 'all' ? (() => {
+        const days = dateRange === '1day' ? 1 : dateRange === '7days' ? 7 : dateRange === '30days' ? 30 : 90;
+        const date = new Date();
+        date.setDate(date.getDate() - days);
+        return date;
+      })() : undefined;
+
+      const filters: AuditLogFilters = {
+        startDate,
+        action: actionFilter !== 'all' ? actionFilter : undefined,
+        userRole: userRoleFilter !== 'all' ? userRoleFilter : undefined,
+      };
+
+      const blob = await AuditLogsApiService.exportAuditLogs(filters);
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.style.display = 'none';
+      a.href = url;
+      a.download = `audit-logs-${new Date().toISOString().split('T')[0]}.csv`;
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(url);
+    } catch (err) {
+      console.error('Error exporting audit logs:', err);
+      alert('Failed to export audit logs. Please try again.');
+    }
+  };
+
+  // Helper functions
   const getActionIcon = (action: string) => {
     switch (action) {
       case 'view':
@@ -174,16 +182,21 @@ export default function AuditPage() {
     }
   };
 
+  // Filter logs by search term and other filters
   const filteredLogs = auditLogs.filter(log => {
-    const matchesSearch = log.userName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                         log.resourceName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                         log.details?.toLowerCase().includes(searchTerm.toLowerCase());
+    const matchesSearch = !searchTerm || 
+      log.userName.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      log.resourceName.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      log.details?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      log.ipAddress.includes(searchTerm);
+    
     const matchesAction = actionFilter === 'all' || log.action === actionFilter;
     const matchesRole = userRoleFilter === 'all' || log.userRole === userRoleFilter;
     
     return matchesSearch && matchesAction && matchesRole;
   });
 
+  // Calculate stats from current data
   const totalActions = auditLogs.length;
   const successfulActions = auditLogs.filter(log => log.success).length;
   const failedActions = auditLogs.filter(log => !log.success).length;
@@ -199,7 +212,7 @@ export default function AuditPage() {
           description="Monitor all system activities and data access across the platform"
         >
           <div className="flex space-x-2">
-            <Button variant="outline">
+            <Button variant="outline" onClick={handleExportLogs}>
               <Download className="w-4 h-4 mr-2" />
               Export Logs
             </Button>

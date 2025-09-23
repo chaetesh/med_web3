@@ -1,6 +1,9 @@
 'use client';
 
+import { useState, useEffect } from 'react';
 import { useAuthStore } from '@/store/useAuthStore';
+import { UserRole } from '@/lib/types/auth.types';
+import { DashboardApiService, DashboardData } from '@/lib/services/dashboard.service';
 import ProtectedRoute from '@/components/ProtectedRoute';
 import { StatCard } from '@/components/Card';
 import { 
@@ -16,38 +19,85 @@ import {
 
 function DashboardContent() {
   const { user } = useAuthStore();
+  const [dashboardData, setDashboardData] = useState<DashboardData | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const fetchDashboardData = async () => {
+      if (!user) return;
+
+      try {
+        setLoading(true);
+        setError(null);
+        const data = await DashboardApiService.getDashboardData(user.role, user.hospitalId);
+        setDashboardData(data);
+      } catch (err) {
+        console.error('Failed to fetch dashboard data:', err);
+        setError('Failed to load dashboard data');
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchDashboardData();
+  }, [user]);
 
   if (!user) return null;
+
+  if (loading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="text-center">
+          <p className="text-red-600 mb-4">{error}</p>
+          <button
+            onClick={() => window.location.reload()}
+            className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700"
+          >
+            Retry
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   const renderPatientDashboard = () => (
     <div className="space-y-6">
       <div>
-        <h1 className="text-2xl font-bold text-gray-900">Welcome back, {user.name}</h1>
+        <h1 className="text-2xl font-bold text-gray-900">Welcome back, {user.firstName} {user.lastName}</h1>
         <p className="text-gray-600">Manage your health records and share them securely.</p>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
         <StatCard
           title="Total Records"
-          value="12"
+          value={dashboardData?.stats.totalRecords?.toString() || '0'}
           change={{ value: "+2 this month", trend: "up" }}
           icon={<FileText className="w-6 h-6 text-blue-600" />}
         />
         <StatCard
           title="Recent Access"
-          value="3"
+          value={dashboardData?.stats.recentAccess?.toString() || '0'}
           change={{ value: "Last 7 days", trend: "neutral" }}
           icon={<Activity className="w-6 h-6 text-green-600" />}
         />
         <StatCard
           title="Shared Records"
-          value="5"
+          value={dashboardData?.stats.sharedRecords?.toString() || '0'}
           change={{ value: "Currently active", trend: "neutral" }}
           icon={<Shield className="w-6 h-6 text-purple-600" />}
         />
         <StatCard
           title="Wallet Status"
-          value="Connected"
+          value={dashboardData?.stats.walletStatus || 'Disconnected'}
           icon={<Database className="w-6 h-6 text-orange-600" />}
         />
       </div>
@@ -56,27 +106,20 @@ function DashboardContent() {
         <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
           <h3 className="text-lg font-semibold text-gray-900 mb-4">Recent Activity</h3>
           <div className="space-y-4">
-            <div className="flex items-center space-x-3">
-              <div className="w-2 h-2 bg-blue-500 rounded-full"></div>
-              <div className="flex-1">
-                <p className="text-sm text-gray-900">Blood test results uploaded</p>
-                <p className="text-xs text-gray-500">2 hours ago</p>
+            {dashboardData?.recentActivity.map((activity) => (
+              <div key={activity.id} className="flex items-center space-x-3">
+                <div className={`w-2 h-2 rounded-full ${
+                  activity.status === 'success' ? 'bg-green-500' : 
+                  activity.status === 'pending' ? 'bg-yellow-500' : 'bg-red-500'
+                }`}></div>
+                <div className="flex-1">
+                  <p className="text-sm text-gray-900">{activity.description}</p>
+                  <p className="text-xs text-gray-500">{new Date(activity.timestamp).toLocaleDateString()}</p>
+                </div>
               </div>
-            </div>
-            <div className="flex items-center space-x-3">
-              <div className="w-2 h-2 bg-green-500 rounded-full"></div>
-              <div className="flex-1">
-                <p className="text-sm text-gray-900">Record accessed by Dr. Smith</p>
-                <p className="text-xs text-gray-500">1 day ago</p>
-              </div>
-            </div>
-            <div className="flex items-center space-x-3">
-              <div className="w-2 h-2 bg-purple-500 rounded-full"></div>
-              <div className="flex-1">
-                <p className="text-sm text-gray-900">X-ray shared with City Hospital</p>
-                <p className="text-xs text-gray-500">3 days ago</p>
-              </div>
-            </div>
+            )) || (
+              <p className="text-gray-500 text-sm">No recent activity</p>
+            )}
           </div>
         </div>
 
@@ -108,61 +151,51 @@ function DashboardContent() {
   const renderDoctorDashboard = () => (
     <div className="space-y-6">
       <div>
-        <h1 className="text-2xl font-bold text-gray-900">Welcome back, Dr. {user.name}</h1>
+        <h1 className="text-2xl font-bold text-gray-900">Welcome back, Dr. {user.firstName} {user.lastName}</h1>
         <p className="text-gray-600">Access patient records and manage your practice.</p>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
         <StatCard
           title="Patients Treated"
-          value="127"
+          value={dashboardData?.stats.totalPatients?.toString() || '0'}
           change={{ value: "+12 this week", trend: "up" }}
           icon={<Users className="w-6 h-6 text-blue-600" />}
         />
         <StatCard
           title="Records Accessed"
-          value="45"
+          value={dashboardData?.stats.totalRecords?.toString() || '0'}
           change={{ value: "Today", trend: "neutral" }}
           icon={<FileText className="w-6 h-6 text-green-600" />}
         />
         <StatCard
           title="Appointments"
-          value="8"
+          value={dashboardData?.stats.appointmentsToday?.toString() || '0'}
           change={{ value: "Today", trend: "neutral" }}
           icon={<Clock className="w-6 h-6 text-purple-600" />}
         />
         <StatCard
           title="Pending Reviews"
-          value="3"
+          value={dashboardData?.stats.pendingReviews?.toString() || '0'}
           icon={<Bell className="w-6 h-6 text-orange-600" />}
         />
       </div>
 
       <div className="grid lg:grid-cols-2 gap-6">
         <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
-          <h3 className="text-lg font-semibold text-gray-900 mb-4">Recent Patients</h3>
+          <h3 className="text-lg font-semibold text-gray-900 mb-4">Recent Activity</h3>
           <div className="space-y-4">
-            <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
-              <div>
-                <p className="font-medium text-gray-900">John Smith</p>
-                <p className="text-sm text-gray-600">Last visit: 2 days ago</p>
+            {dashboardData?.recentActivity.map((activity) => (
+              <div key={activity.id} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+                <div>
+                  <p className="font-medium text-gray-900">{activity.description}</p>
+                  <p className="text-sm text-gray-600">{new Date(activity.timestamp).toLocaleDateString()}</p>
+                </div>
+                <button className="text-blue-600 hover:text-blue-700 text-sm">View</button>
               </div>
-              <button className="text-blue-600 hover:text-blue-700 text-sm">View Records</button>
-            </div>
-            <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
-              <div>
-                <p className="font-medium text-gray-900">Sarah Johnson</p>
-                <p className="text-sm text-gray-600">Last visit: 1 week ago</p>
-              </div>
-              <button className="text-blue-600 hover:text-blue-700 text-sm">View Records</button>
-            </div>
-            <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
-              <div>
-                <p className="font-medium text-gray-900">Mike Davis</p>
-                <p className="text-sm text-gray-600">Last visit: 2 weeks ago</p>
-              </div>
-              <button className="text-blue-600 hover:text-blue-700 text-sm">View Records</button>
-            </div>
+            )) || (
+              <p className="text-gray-500 text-sm">No recent activity</p>
+            )}
           </div>
         </div>
 
@@ -201,50 +234,50 @@ function DashboardContent() {
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
         <StatCard
           title="Total Doctors"
-          value="45"
-          change={{ value: "+3 this month", trend: "up" }}
+          value={dashboardData?.stats.totalDoctors?.toString() || '0'}
+          change={{ value: "Active", trend: "up" }}
           icon={<Users className="w-6 h-6 text-blue-600" />}
         />
         <StatCard
+          title="Total Patients"
+          value={dashboardData?.stats.totalPatients?.toString() || '0'}
+          change={{ value: "Registered", trend: "up" }}
+          icon={<Users className="w-6 h-6 text-green-600" />}
+        />
+        <StatCard
           title="Patient Records"
-          value="1,247"
-          change={{ value: "+89 this week", trend: "up" }}
-          icon={<FileText className="w-6 h-6 text-green-600" />}
+          value={dashboardData?.stats.totalRecords?.toString() || '0'}
+          change={{ value: "Total records", trend: "up" }}
+          icon={<FileText className="w-6 h-6 text-purple-600" />}
         />
         <StatCard
           title="Daily Access"
-          value="324"
-          change={{ value: "+12% vs yesterday", trend: "up" }}
-          icon={<Activity className="w-6 h-6 text-purple-600" />}
-        />
-        <StatCard
-          title="System Health"
-          value="99.9%"
-          change={{ value: "Uptime", trend: "up" }}
-          icon={<TrendingUp className="w-6 h-6 text-orange-600" />}
+          value={dashboardData?.stats.dailyAccess?.toString() || '0'}
+          change={{ value: "Today", trend: "up" }}
+          icon={<Activity className="w-6 h-6 text-orange-600" />}
         />
       </div>
 
       <div className="grid lg:grid-cols-2 gap-6">
         <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
-          <h3 className="text-lg font-semibold text-gray-900 mb-4">Department Overview</h3>
+          <h3 className="text-lg font-semibold text-gray-900 mb-4">Recent Activity</h3>
           <div className="space-y-4">
-            <div className="flex items-center justify-between">
-              <span className="text-sm text-gray-600">Cardiology</span>
-              <span className="text-sm font-medium">12 doctors, 156 patients</span>
-            </div>
-            <div className="flex items-center justify-between">
-              <span className="text-sm text-gray-600">Emergency</span>
-              <span className="text-sm font-medium">8 doctors, 89 patients</span>
-            </div>
-            <div className="flex items-center justify-between">
-              <span className="text-sm text-gray-600">Pediatrics</span>
-              <span className="text-sm font-medium">6 doctors, 234 patients</span>
-            </div>
-            <div className="flex items-center justify-between">
-              <span className="text-sm text-gray-600">Orthopedics</span>
-              <span className="text-sm font-medium">9 doctors, 178 patients</span>
-            </div>
+            {dashboardData?.recentActivity && dashboardData.recentActivity.length > 0 ? (
+              dashboardData.recentActivity.map((activity) => (
+                <div key={activity.id} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+                  <div>
+                    <p className="font-medium text-gray-900">{activity.description}</p>
+                    <p className="text-sm text-gray-600">{new Date(activity.timestamp).toLocaleDateString()}</p>
+                  </div>
+                  <div className={`w-2 h-2 rounded-full ${
+                    activity.status === 'success' ? 'bg-green-500' : 
+                    activity.status === 'pending' ? 'bg-yellow-500' : 'bg-red-500'
+                  }`}></div>
+                </div>
+              ))
+            ) : (
+              <p className="text-gray-500 text-sm">No recent activity</p>
+            )}
           </div>
         </div>
 
@@ -283,50 +316,55 @@ function DashboardContent() {
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
         <StatCard
           title="Total Users"
-          value="12,543"
-          change={{ value: "+234 this week", trend: "up" }}
+          value={dashboardData?.stats.totalUsers?.toLocaleString() || '0'}
+          change={{ value: "All roles", trend: "up" }}
           icon={<Users className="w-6 h-6 text-blue-600" />}
         />
         <StatCard
           title="Total Records"
-          value="45,321"
-          change={{ value: "+1,234 today", trend: "up" }}
+          value={dashboardData?.stats.totalRecords?.toLocaleString() || '0'}
+          change={{ value: "Medical records", trend: "up" }}
           icon={<FileText className="w-6 h-6 text-green-600" />}
         />
         <StatCard
-          title="Blockchain Txns"
-          value="8,765"
-          change={{ value: "+123 today", trend: "up" }}
+          title="Active Hospitals"
+          value={dashboardData?.stats.activeHospitals?.toString() || '0'}
+          change={{ value: "Registered", trend: "up" }}
           icon={<Database className="w-6 h-6 text-purple-600" />}
         />
         <StatCard
-          title="Active Hospitals"
-          value="156"
-          change={{ value: "+5 this month", trend: "up" }}
+          title="System Health"
+          value={dashboardData?.stats.systemHealth || 'Unknown'}
+          change={{ 
+            value: dashboardData?.stats.uptime 
+              ? `${DashboardApiService.formatUptime(dashboardData.stats.uptime)} uptime` 
+              : "Monitoring", 
+            trend: "up" 
+          }}
           icon={<TrendingUp className="w-6 h-6 text-orange-600" />}
         />
       </div>
 
       <div className="grid lg:grid-cols-2 gap-6">
         <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
-          <h3 className="text-lg font-semibold text-gray-900 mb-4">System Health</h3>
+          <h3 className="text-lg font-semibold text-gray-900 mb-4">Recent System Activity</h3>
           <div className="space-y-4">
-            <div className="flex items-center justify-between">
-              <span className="text-sm text-gray-600">API Response Time</span>
-              <span className="text-sm font-medium text-green-600">245ms</span>
-            </div>
-            <div className="flex items-center justify-between">
-              <span className="text-sm text-gray-600">Database Performance</span>
-              <span className="text-sm font-medium text-green-600">Optimal</span>
-            </div>
-            <div className="flex items-center justify-between">
-              <span className="text-sm text-gray-600">Blockchain Sync</span>
-              <span className="text-sm font-medium text-green-600">100%</span>
-            </div>
-            <div className="flex items-center justify-between">
-              <span className="text-sm text-gray-600">AI Service</span>
-              <span className="text-sm font-medium text-green-600">Active</span>
-            </div>
+            {dashboardData?.recentActivity && dashboardData.recentActivity.length > 0 ? (
+              dashboardData.recentActivity.map((activity) => (
+                <div key={activity.id} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+                  <div>
+                    <p className="font-medium text-gray-900">{activity.description}</p>
+                    <p className="text-sm text-gray-600">{new Date(activity.timestamp).toLocaleDateString()}</p>
+                  </div>
+                  <div className={`w-2 h-2 rounded-full ${
+                    activity.status === 'success' ? 'bg-green-500' : 
+                    activity.status === 'pending' ? 'bg-yellow-500' : 'bg-red-500'
+                  }`}></div>
+                </div>
+              ))
+            ) : (
+              <p className="text-gray-500 text-sm">No recent activity</p>
+            )}
           </div>
         </div>
 
@@ -356,13 +394,13 @@ function DashboardContent() {
   );
 
   switch (user.role) {
-    case 'patient':
+    case UserRole.PATIENT:
       return renderPatientDashboard();
-    case 'doctor':
+    case UserRole.DOCTOR:
       return renderDoctorDashboard();
-    case 'hospital_admin':
+    case UserRole.HOSPITAL_ADMIN:
       return renderHospitalAdminDashboard();
-    case 'system_admin':
+    case UserRole.SYSTEM_ADMIN:
       return renderSystemAdminDashboard();
     default:
       return <div>Unknown user role</div>;

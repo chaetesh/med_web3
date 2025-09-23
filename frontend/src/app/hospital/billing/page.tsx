@@ -1,10 +1,11 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import ProtectedRoute from '@/components/ProtectedRoute';
 import PageHeader from '@/components/PageHeader';
 import { Card, StatCard } from '@/components/Card';
 import Button from '@/components/Button';
+import { HospitalApiService } from '@/lib/services/hospital.service';
 import { 
   DollarSign, 
   CreditCard, 
@@ -28,7 +29,8 @@ import {
   Activity,
   Receipt,
   Banknote,
-  Wallet
+  Wallet,
+  Loader2
 } from 'lucide-react';
 
 interface Bill {
@@ -73,6 +75,27 @@ interface Payment {
   notes?: string;
 }
 
+interface BillingApiData {
+  summary: {
+    totalRevenue: number;
+    totalBilled: number;
+    totalPending: number;
+    insuranceClaims: number;
+  };
+  byDepartment: Array<{
+    name: string;
+    revenue: number;
+    bills: number;
+    paid: number;
+    pending: number;
+  }>;
+  byDoctor: Array<{
+    name: string;
+    revenue: number;
+    bills: number;
+  }>;
+}
+
 export default function HospitalBillingPage() {
   const [activeTab, setActiveTab] = useState<'overview' | 'bills' | 'payments' | 'reports'>('overview');
   const [searchTerm, setSearchTerm] = useState('');
@@ -82,6 +105,31 @@ export default function HospitalBillingPage() {
   const [selectedBill, setSelectedBill] = useState<Bill | null>(null);
   const [showBillModal, setShowBillModal] = useState(false);
   const [showPaymentModal, setShowPaymentModal] = useState(false);
+  
+  // API state
+  const [billingData, setBillingData] = useState<BillingApiData | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  // Fetch billing data from API
+  useEffect(() => {
+    const fetchBillingData = async () => {
+      try {
+        setLoading(true);
+        setError(null);
+        
+        const response = await HospitalApiService.getBillingReports();
+        setBillingData(response);
+      } catch (err: any) {
+        console.error('Error fetching billing data:', err);
+        setError(err.message || 'Failed to fetch billing data');
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchBillingData();
+  }, []);
 
   // Mock data
   const bills: Bill[] = [
@@ -297,26 +345,62 @@ export default function HospitalBillingPage() {
     return matchesSearch && matchesStatus && matchesDepartment;
   });
 
-  // Statistics
-  const totalBills = bills.length;
-  const totalRevenue = bills.reduce((sum, bill) => sum + bill.totalAmount, 0);
-  const totalPaid = bills.reduce((sum, bill) => sum + bill.paidAmount, 0);
-  const totalOutstanding = bills.reduce((sum, bill) => sum + bill.balanceAmount, 0);
-  const paidBills = bills.filter(bill => bill.status === 'paid').length;
-  const overdueBills = bills.filter(bill => bill.status === 'overdue').length;
-  const pendingBills = bills.filter(bill => bill.status === 'pending').length;
-
-  // Department revenue
-  const departmentRevenue = departments.slice(1).map(dept => {
-    const deptBills = bills.filter(bill => bill.department === dept);
+  // Statistics - Use API data when available, fallback to mock data
+  const getStatistics = () => {
+    if (billingData) {
+      return {
+        totalBills: bills.length, // Keep bill count from mock for now
+        totalRevenue: billingData.summary.totalBilled || billingData.summary.totalRevenue || 0,
+        totalPaid: billingData.summary.totalRevenue || 0,
+        totalOutstanding: billingData.summary.totalPending || 0,
+        paidBills: bills.filter(bill => bill.status === 'paid').length,
+        overdueBills: bills.filter(bill => bill.status === 'overdue').length,
+        pendingBills: bills.filter(bill => bill.status === 'pending').length,
+        insuranceClaims: billingData.summary.insuranceClaims || 0
+      };
+    }
+    
+    // Fallback to mock data
     return {
-      name: dept,
-      revenue: deptBills.reduce((sum, bill) => sum + bill.totalAmount, 0),
-      paid: deptBills.reduce((sum, bill) => sum + bill.paidAmount, 0),
-      outstanding: deptBills.reduce((sum, bill) => sum + bill.balanceAmount, 0),
-      bills: deptBills.length
+      totalBills: bills.length,
+      totalRevenue: bills.reduce((sum, bill) => sum + bill.totalAmount, 0),
+      totalPaid: bills.reduce((sum, bill) => sum + bill.paidAmount, 0),
+      totalOutstanding: bills.reduce((sum, bill) => sum + bill.balanceAmount, 0),
+      paidBills: bills.filter(bill => bill.status === 'paid').length,
+      overdueBills: bills.filter(bill => bill.status === 'overdue').length,
+      pendingBills: bills.filter(bill => bill.status === 'pending').length,
+      insuranceClaims: 0
     };
-  });
+  };
+
+  const stats = getStatistics();
+
+  // Department revenue - Use API data when available
+  const getDepartmentRevenue = () => {
+    if (billingData && billingData.byDepartment.length > 0) {
+      return billingData.byDepartment.map(dept => ({
+        name: dept.name,
+        revenue: dept.revenue,
+        paid: dept.paid || dept.revenue,
+        outstanding: dept.pending || 0,
+        bills: dept.bills
+      }));
+    }
+    
+    // Fallback to mock calculation
+    return departments.slice(1).map(dept => {
+      const deptBills = bills.filter(bill => bill.department === dept);
+      return {
+        name: dept,
+        revenue: deptBills.reduce((sum, bill) => sum + bill.totalAmount, 0),
+        paid: deptBills.reduce((sum, bill) => sum + bill.paidAmount, 0),
+        outstanding: deptBills.reduce((sum, bill) => sum + bill.balanceAmount, 0),
+        bills: deptBills.length
+      };
+    });
+  };
+
+  const departmentRevenue = getDepartmentRevenue();
 
   const handleBillSelect = (bill: Bill) => {
     setSelectedBill(bill);
@@ -347,30 +431,52 @@ export default function HospitalBillingPage() {
           </div>
         </PageHeader>
 
+        {/* Loading State */}
+        {loading && (
+          <div className="flex items-center justify-center py-12">
+            <Loader2 className="w-8 h-8 animate-spin text-blue-600" />
+            <span className="ml-3 text-gray-600">Loading billing data...</span>
+          </div>
+        )}
+
+        {/* Error State */}
+        {error && (
+          <div className="bg-red-50 border border-red-200 rounded-lg p-4 mb-6">
+            <div className="flex items-center">
+              <div className="text-red-800">
+                <strong>Error:</strong> {error}
+              </div>
+            </div>
+            <p className="text-red-600 text-sm mt-2">
+              Showing fallback data. Please try refreshing the page.
+            </p>
+          </div>
+        )}
+
         {/* Financial Overview */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
           <StatCard
             title="Total Revenue"
-            value={`$${totalRevenue.toLocaleString()}`}
+            value={`$${stats.totalRevenue.toLocaleString()}`}
             change={{ value: "All time revenue", trend: "up" }}
             icon={<DollarSign className="w-6 h-6 text-green-600" />}
           />
           <StatCard
             title="Amount Collected"
-            value={`$${totalPaid.toLocaleString()}`}
-            change={{ value: `${Math.round((totalPaid / totalRevenue) * 100)}% collection rate`, trend: "up" }}
+            value={`$${stats.totalPaid.toLocaleString()}`}
+            change={{ value: `${Math.round((stats.totalPaid / stats.totalRevenue) * 100)}% collection rate`, trend: "up" }}
             icon={<CheckCircle className="w-6 h-6 text-blue-600" />}
           />
           <StatCard
             title="Outstanding Amount"
-            value={`$${totalOutstanding.toLocaleString()}`}
-            change={{ value: `${overdueBills} overdue bills`, trend: "down" }}
+            value={`$${stats.totalOutstanding.toLocaleString()}`}
+            change={{ value: `${stats.overdueBills} overdue bills`, trend: "down" }}
             icon={<AlertTriangle className="w-6 h-6 text-red-600" />}
           />
           <StatCard
             title="Total Bills"
-            value={totalBills.toString()}
-            change={{ value: `${paidBills} paid, ${pendingBills} pending`, trend: "neutral" }}
+            value={stats.totalBills.toString()}
+            change={{ value: `${stats.paidBills} paid, ${stats.pendingBills} pending`, trend: "neutral" }}
             icon={<FileText className="w-6 h-6 text-purple-600" />}
           />
         </div>
@@ -398,7 +504,7 @@ export default function HospitalBillingPage() {
               }`}
             >
               <FileText className="w-4 h-4 inline mr-2" />
-              Bills ({totalBills})
+              Bills ({stats.totalBills})
             </button>
             <button
               onClick={() => setActiveTab('payments')}

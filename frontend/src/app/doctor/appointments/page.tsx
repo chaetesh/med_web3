@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import ProtectedRoute from '@/components/ProtectedRoute';
 import PageHeader from '@/components/PageHeader';
 import { Card, StatCard } from '@/components/Card';
@@ -33,7 +33,16 @@ import {
   TrendingUp,
   DollarSign
 } from 'lucide-react';
+import { 
+  AppointmentApiService,
+  AppointmentStatus,
+  AppointmentType,
+  AppointmentResponse,
+  Appointment as ApiAppointment
+} from '@/lib/services/appointment.service';
+import { ApiErrorClass } from '@/lib/services/auth.service';
 
+// Mapped appointment interface for UI compatibility
 interface Appointment {
   id: string;
   patientId: string;
@@ -45,8 +54,8 @@ interface Appointment {
   date: string;
   time: string;
   duration: number; // in minutes
-  status: 'scheduled' | 'completed' | 'cancelled' | 'no-show' | 'in-progress';
-  type: 'consultation' | 'follow-up' | 'emergency' | 'routine-checkup';
+  status: 'scheduled' | 'completed' | 'cancelled' | 'no-show' | 'in-progress' | 'confirmed';
+  type: 'consultation' | 'follow-up' | 'emergency' | 'routine-checkup' | 'in_person' | 'virtual';
   symptoms: string;
   notes?: string;
   consultationFee: number;
@@ -69,152 +78,118 @@ export default function DoctorAppointmentsPage() {
   const [showAppointmentModal, setShowAppointmentModal] = useState(false);
   const [showNotesModal, setShowNotesModal] = useState(false);
   const [appointmentNotes, setAppointmentNotes] = useState('');
+  
+  // API data states
+  const [appointments, setAppointments] = useState<Appointment[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  // Mock data - replace with actual API calls
-  const appointments: Appointment[] = [
-    {
-      id: 'A001',
-      patientId: 'P001',
-      patientName: 'Sarah Johnson',
-      patientAge: 39,
-      patientGender: 'female',
-      patientPhone: '+1-555-0123',
-      patientEmail: 'sarah.johnson@email.com',
-      date: '2024-07-24',
-      time: '09:00',
-      duration: 30,
-      status: 'scheduled',
-      type: 'consultation',
-      symptoms: 'Chest pain, shortness of breath, fatigue',
-      consultationFee: 200,
-      isFirstVisit: false,
-      lastVisitDate: '2024-06-15',
-      allergies: ['Penicillin'],
-      chronicConditions: ['Hypertension'],
-      urgencyLevel: 'high',
-      appointmentMode: 'in-person',
-      insuranceProvider: 'BlueCross BlueShield',
-      referredBy: 'Dr. Smith (Family Medicine)'
-    },
-    {
-      id: 'A002',
-      patientId: 'P002',
-      patientName: 'Robert Martinez',
-      patientAge: 51,
-      patientGender: 'male',
-      patientPhone: '+1-555-0125',
-      patientEmail: 'robert.martinez@email.com',
-      date: '2024-07-24',
-      time: '10:30',
-      duration: 45,
-      status: 'scheduled',
-      type: 'follow-up',
-      symptoms: 'Diabetes management check-up',
-      consultationFee: 150,
-      isFirstVisit: false,
-      lastVisitDate: '2024-07-10',
-      allergies: ['Latex'],
-      chronicConditions: ['Diabetes Type 2', 'High Cholesterol'],
-      urgencyLevel: 'medium',
-      appointmentMode: 'in-person',
-      insuranceProvider: 'Aetna'
-    },
-    {
-      id: 'A003',
-      patientId: 'P003',
-      patientName: 'Emily Chen',
-      patientAge: 33,
-      patientGender: 'female',
-      patientPhone: '+1-555-0127',
-      patientEmail: 'emily.chen@email.com',
-      date: '2024-07-24',
-      time: '14:00',
-      duration: 30,
-      status: 'scheduled',
-      type: 'consultation',
-      symptoms: 'Annual physical examination',
-      consultationFee: 200,
-      isFirstVisit: true,
-      allergies: [],
-      chronicConditions: [],
-      urgencyLevel: 'low',
-      appointmentMode: 'in-person',
-      insuranceProvider: 'United Healthcare'
-    },
-    {
-      id: 'A004',
-      patientId: 'P004',
-      patientName: 'Michael Thompson',
-      patientAge: 59,
-      patientGender: 'male',
-      patientPhone: '+1-555-0129',
-      patientEmail: 'michael.thompson@email.com',
-      date: '2024-07-24',
-      time: '15:30',
-      duration: 30,
-      status: 'completed',
-      type: 'consultation',
-      symptoms: 'Joint pain, arthritis symptoms',
-      notes: 'Prescribed anti-inflammatory medication. Recommended physical therapy. Follow-up in 4 weeks.',
-      consultationFee: 200,
-      isFirstVisit: false,
-      lastVisitDate: '2024-05-20',
-      allergies: ['Aspirin'],
-      chronicConditions: ['Arthritis'],
-      urgencyLevel: 'medium',
-      appointmentMode: 'in-person',
-      insuranceProvider: 'Medicare'
-    },
-    {
-      id: 'A005',
-      patientId: 'P005',
-      patientName: 'Lisa Wang',
-      patientAge: 28,
-      patientGender: 'female',
-      patientPhone: '+1-555-0131',
-      patientEmail: 'lisa.wang@email.com',
-      date: '2024-07-25',
-      time: '09:30',
-      duration: 30,
-      status: 'scheduled',
-      type: 'consultation',
-      symptoms: 'Headaches, sleep issues',
-      consultationFee: 200,
-      isFirstVisit: true,
-      allergies: [],
-      chronicConditions: [],
-      urgencyLevel: 'medium',
-      appointmentMode: 'video-call',
-      insuranceProvider: 'Kaiser Permanente'
-    },
-    {
-      id: 'A006',
-      patientId: 'P006',
-      patientName: 'David Rodriguez',
-      patientAge: 45,
-      patientGender: 'male',
-      patientPhone: '+1-555-0133',
-      patientEmail: 'david.rodriguez@email.com',
-      date: '2024-07-23',
-      time: '11:00',
-      duration: 30,
-      status: 'no-show',
-      type: 'follow-up',
-      symptoms: 'Blood pressure monitoring',
-      consultationFee: 150,
-      isFirstVisit: false,
-      lastVisitDate: '2024-06-23',
-      allergies: [],
-      chronicConditions: ['Hypertension'],
-      urgencyLevel: 'medium',
-      appointmentMode: 'in-person',
-      insuranceProvider: 'Humana'
+  // Fetch appointments on component mount
+  useEffect(() => {
+    const fetchAppointments = async () => {
+      setLoading(true);
+      try {
+        const response = await AppointmentApiService.getDoctorAppointments({
+          page: 1,
+          limit: 100
+        });
+
+        // Map API appointments to UI appointments
+        const mappedAppointments: Appointment[] = response.appointments.map(apiAppointment => ({
+          id: apiAppointment._id,
+          patientId: apiAppointment.patientId._id,
+          patientName: `${apiAppointment.patientId.firstName} ${apiAppointment.patientId.lastName}`,
+          patientAge: 30, // This would need to be calculated or stored in patient data
+          patientGender: 'other' as const, // This would come from patient data
+          patientPhone: apiAppointment.patientId.phone || 'N/A',
+          patientEmail: apiAppointment.patientId.email || 'N/A',
+          date: new Date(apiAppointment.startTime).toISOString().split('T')[0],
+          time: new Date(apiAppointment.startTime).toTimeString().slice(0, 5),
+          duration: Math.round((new Date(apiAppointment.endTime).getTime() - new Date(apiAppointment.startTime).getTime()) / (1000 * 60)),
+          status: apiAppointment.status === AppointmentStatus.CONFIRMED ? 'confirmed' : apiAppointment.status as any,
+          type: apiAppointment.type === AppointmentType.IN_PERSON ? 'in_person' : 'virtual',
+          symptoms: apiAppointment.title,
+          notes: apiAppointment.notes,
+          consultationFee: 200, // This should come from doctor's profile
+          isFirstVisit: true, // This would need to be calculated based on patient history
+          lastVisitDate: undefined,
+          allergies: [], // This would come from patient medical records
+          chronicConditions: [], // This would come from patient medical records
+          urgencyLevel: 'medium' as const, // This could be derived from appointment type or set by patient
+          appointmentMode: apiAppointment.type === AppointmentType.IN_PERSON ? 'in-person' : 'video-call',
+          insuranceProvider: undefined,
+          referredBy: undefined
+        }));
+
+        setAppointments(mappedAppointments);
+        setError(null);
+      } catch (err) {
+        console.error('Error fetching appointments:', err);
+        setError(err instanceof ApiErrorClass ? err.message : 'Failed to load appointments');
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchAppointments();
+  }, []);
+
+  // Update appointment status
+  const handleStatusChange = async (appointmentId: string, newStatus: string) => {
+    try {
+      setLoading(true);
+      await AppointmentApiService.updateAppointmentStatus(appointmentId, {
+        status: newStatus as AppointmentStatus,
+        reason: `Status updated by doctor`
+      });
+      
+      // Update local state
+      setAppointments(prev => prev.map(apt => 
+        apt.id === appointmentId 
+          ? { ...apt, status: newStatus as any }
+          : apt
+      ));
+      
+      setError(null);
+    } catch (err) {
+      console.error('Error updating appointment status:', err);
+      setError(err instanceof ApiErrorClass ? err.message : 'Failed to update appointment');
+    } finally {
+      setLoading(false);
     }
-  ];
+  };
+
+  // Save appointment notes
+  const handleSaveNotes = async () => {
+    if (!selectedAppointment) return;
+    
+    try {
+      setLoading(true);
+      // This would need a backend API to save notes
+      // For now, we'll just update local state
+      setAppointments(prev => prev.map(apt => 
+        apt.id === selectedAppointment.id 
+          ? { ...apt, notes: appointmentNotes }
+          : apt
+      ));
+      
+      setShowNotesModal(false);
+      setSelectedAppointment(null);
+      setAppointmentNotes('');
+      setError(null);
+    } catch (err) {
+      console.error('Error saving notes:', err);
+      setError(err instanceof ApiErrorClass ? err.message : 'Failed to save notes');
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const getStatusColor = (status: string) => {
     switch (status) {
       case 'scheduled':
+        return 'bg-blue-100 text-blue-800';
+      case 'confirmed':
         return 'bg-blue-100 text-blue-800';
       case 'completed':
         return 'bg-green-100 text-green-800';
@@ -319,22 +294,50 @@ export default function DoctorAppointmentsPage() {
     setShowNotesModal(true);
   };
 
-  const handleSaveNotes = () => {
-    // Here you would typically make an API call to save the notes
-    console.log('Saving notes for appointment:', selectedAppointment?.id, appointmentNotes);
-    setShowNotesModal(false);
-    setSelectedAppointment(null);
-    setAppointmentNotes('');
-  };
+  // Show loading state
+  if (loading && appointments.length === 0) {
+    return (
+      <ProtectedRoute allowedRoles={['doctor']}>
+        <div className="flex items-center justify-center min-h-[400px]">
+          <div className="text-center">
+            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto mb-4"></div>
+            <p className="text-gray-500">Loading appointments...</p>
+          </div>
+        </div>
+      </ProtectedRoute>
+    );
+  }
 
-  const handleStatusChange = (appointmentId: string, newStatus: string) => {
-    // Here you would typically make an API call to update the status
-    console.log('Updating appointment status:', appointmentId, newStatus);
-  };
+  // Show error state
+  if (error && appointments.length === 0) {
+    return (
+      <ProtectedRoute allowedRoles={['doctor']}>
+        <div className="flex items-center justify-center min-h-[400px]">
+          <div className="text-center">
+            <AlertCircle className="w-8 h-8 text-red-600 mx-auto mb-4" />
+            <p className="text-red-600 mb-4">{error}</p>
+            <Button onClick={() => window.location.reload()}>Try Again</Button>
+          </div>
+        </div>
+      </ProtectedRoute>
+    );
+  }
 
   return (
     <ProtectedRoute allowedRoles={['doctor']}>
       <div className="space-y-6">
+        {error && (
+          <div className="bg-red-50 border border-red-200 rounded-md p-4">
+            <div className="flex">
+              <AlertCircle className="h-5 w-5 text-red-400" />
+              <div className="ml-3">
+                <h3 className="text-sm font-medium text-red-800">Error</h3>
+                <p className="mt-2 text-sm text-red-700">{error}</p>
+              </div>
+            </div>
+          </div>
+        )}
+        
         <PageHeader
           title="My Appointments"
           description="Manage your scheduled appointments and patient visits"

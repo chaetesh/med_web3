@@ -1,10 +1,16 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import ProtectedRoute from '@/components/ProtectedRoute';
 import PageHeader from '@/components/PageHeader';
 import { Card, StatCard } from '@/components/Card';
 import Button from '@/components/Button';
+import { 
+  AccessLogsApiService,
+  AccessLog as ApiAccessLog,
+  ApiErrorClass 
+} from '@/lib/services/access-logs.service';
+import { MedicalRecordsService } from '@/lib/services/medical-records.service';
 import { 
   Eye, 
   Clock, 
@@ -28,7 +34,7 @@ interface AccessLog {
   accessor: string;
   accessorType: 'doctor' | 'hospital' | 'patient' | 'system';
   accessedResource: string;
-  accessType: 'view' | 'download' | 'share' | 'edit';
+  accessType: 'view' | 'download' | 'share' | 'upload' | 'revoke';
   timestamp: string;
   location: string;
   ipAddress: string;
@@ -43,88 +49,176 @@ export default function PatientAccessLogsPage() {
   const [accessorFilter, setAccessorFilter] = useState('all');
   const [timeFilter, setTimeFilter] = useState('7days');
   const [statusFilter, setStatusFilter] = useState('all');
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [accessLogs, setAccessLogs] = useState<any[]>([]);
+  const [stats, setStats] = useState({
+    totalAccesses: 0,
+    authorizedAccesses: 0,
+    blockedAccesses: 0,
+    qrCodeAccesses: 0
+  });
 
-  // Mock data - replace with actual API calls
-  const accessLogs: AccessLog[] = [
+  // Load access logs on component mount
+  useEffect(() => {
+    loadAccessLogs();
+    loadStats();
+  }, [timeFilter]);
+
+  const loadAccessLogs = async () => {
+    try {
+      setLoading(true);
+      setError(null);
+
+      // First, get the patient's medical records
+      const medicalRecords = await MedicalRecordsService.getAllRecords();
+      
+      if (!medicalRecords || medicalRecords.length === 0) {
+        setAccessLogs([]);
+        setError('No medical records found. Access logs will appear when you have medical records.');
+        return;
+      }
+
+      // Get record IDs
+      const recordIds = medicalRecords.map((record: any) => record.id);
+      
+      // Get access history for all patient's medical records
+      const accessHistoryResponse = await AccessLogsApiService.getPatientAccessHistory(recordIds);
+
+      // Transform backend logs to frontend format
+      const allLogs: any[] = [];
+      accessHistoryResponse.records.forEach(recordHistory => {
+        recordHistory.accessLogs.forEach(log => {
+          allLogs.push({
+            ...log,
+            recordTitle: recordHistory.record.title,
+            recordId: recordHistory.record.id,
+            timestamp: log.createdAt || log.timestamp || new Date().toISOString()
+          });
+        });
+      });
+
+      // Sort by timestamp (newest first) and apply time filter
+      const endDate = new Date();
+      const startDate = new Date();
+      
+      switch (timeFilter) {
+        case '7days':
+          startDate.setDate(startDate.getDate() - 7);
+          break;
+        case '30days':
+          startDate.setDate(startDate.getDate() - 30);
+          break;
+        case '90days':
+          startDate.setDate(startDate.getDate() - 90);
+          break;
+        case '1year':
+          startDate.setFullYear(startDate.getFullYear() - 1);
+          break;
+        default:
+          startDate.setDate(startDate.getDate() - 7);
+      }
+
+      // Filter logs by date range
+      const filteredLogs = allLogs.filter(log => {
+        const logDate = new Date(log.timestamp);
+        return logDate >= startDate && logDate <= endDate;
+      });
+
+      // Transform to display format
+      const transformedLogs = filteredLogs.map(log => 
+        AccessLogsApiService.transformAccessLog(log)
+      );
+
+      setAccessLogs(transformedLogs);
+    } catch (error) {
+      console.error('Error loading access logs:', error);
+      setError(error instanceof ApiErrorClass ? error.message : 'Unable to load real-time access logs. Showing demo data instead.');
+      
+      // Use mock data as fallback for demo purposes
+      setAccessLogs(getMockAccessLogs());
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const loadStats = async () => {
+    try {
+      const statsData = await AccessLogsApiService.getAccessStats();
+      setStats({
+        totalAccesses: statsData.totalAccesses,
+        authorizedAccesses: statsData.authorizedAccesses,
+        blockedAccesses: statsData.blockedAccesses,
+        qrCodeAccesses: statsData.qrCodeAccesses
+      });
+    } catch (error) {
+      console.error('Error loading stats:', error);
+      // Keep default stats if API call fails
+    }
+  };
+
+  const handleExportLogs = async () => {
+    try {
+      const blob = await AccessLogsApiService.exportAccessLogs({
+        startDate: getStartDateForFilter(timeFilter),
+        endDate: new Date()
+      });
+      
+      // Create download link
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `access-logs-${new Date().toISOString().split('T')[0]}.csv`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch (error) {
+      console.error('Error exporting logs:', error);
+      alert('Failed to export logs. Please try again.');
+    }
+  };
+
+  const getStartDateForFilter = (filter: string): Date => {
+    const date = new Date();
+    switch (filter) {
+      case '7days': date.setDate(date.getDate() - 7); break;
+      case '30days': date.setDate(date.getDate() - 30); break;
+      case '90days': date.setDate(date.getDate() - 90); break;
+      case '1year': date.setFullYear(date.getFullYear() - 1); break;
+      default: date.setDate(date.getDate() - 7);
+    }
+    return date;
+  };
+
+  // Fallback mock data for demo purposes
+  const getMockAccessLogs = () => [
     {
       id: 'log1',
       accessor: 'Dr. Sarah Chen',
-      accessorType: 'doctor',
+      accessorType: 'doctor' as const,
       accessedResource: 'Blood Test Results - CBC Panel',
-      accessType: 'view',
+      accessType: 'view' as const,
       timestamp: '2024-07-20T14:30:00Z',
       location: 'City Hospital - Cardiology Dept',
       ipAddress: '192.168.1.45',
       deviceInfo: 'MacBook Pro - Chrome 126.0',
       purpose: 'Treatment planning and diagnosis review',
-      status: 'authorized',
+      status: 'authorized' as const,
       qrCodeUsed: true
     },
     {
       id: 'log2',
       accessor: 'City Hospital Admin',
-      accessorType: 'hospital',
+      accessorType: 'hospital' as const,
       accessedResource: 'Emergency Contact Information',
-      accessType: 'view',
+      accessType: 'view' as const,
       timestamp: '2024-07-20T09:15:00Z',
       location: 'City Hospital - Emergency Dept',
       ipAddress: '192.168.1.112',
       deviceInfo: 'iPad - Safari 17.0',
       purpose: 'Emergency patient identification',
-      status: 'authorized'
-    },
-    {
-      id: 'log3',
-      accessor: 'Dr. Michael Rodriguez',
-      accessorType: 'doctor',
-      accessedResource: 'X-Ray Chest Scan',
-      accessType: 'download',
-      timestamp: '2024-07-19T16:45:00Z',
-      location: 'City Hospital - Emergency Dept',
-      ipAddress: '192.168.1.78',
-      deviceInfo: 'Windows 11 - Edge 126.0',
-      purpose: 'Second opinion consultation',
-      status: 'authorized',
-      qrCodeUsed: true
-    },
-    {
-      id: 'log4',
-      accessor: 'John Smith',
-      accessorType: 'patient',
-      accessedResource: 'Complete Medical History',
-      accessType: 'share',
-      timestamp: '2024-07-19T10:20:00Z',
-      location: 'Home - Remote Access',
-      ipAddress: '98.207.254.123',
-      deviceInfo: 'iPhone 15 - Safari Mobile',
-      purpose: 'Shared with new healthcare provider',
-      status: 'authorized'
-    },
-    {
-      id: 'log5',
-      accessor: 'Unknown User',
-      accessorType: 'system',
-      accessedResource: 'Patient Profile',
-      accessType: 'view',
-      timestamp: '2024-07-18T23:45:00Z',
-      location: 'Unknown Location',
-      ipAddress: '45.123.78.90',
-      deviceInfo: 'Unknown Device - Unknown Browser',
-      purpose: 'Unauthorized access attempt',
-      status: 'blocked'
-    },
-    {
-      id: 'log6',
-      accessor: 'Dr. Emily Park',
-      accessorType: 'doctor',
-      accessedResource: 'Vaccination Records',
-      accessType: 'view',
-      timestamp: '2024-07-18T11:30:00Z',
-      location: 'Pediatric Clinic - Downtown',
-      ipAddress: '192.168.2.56',
-      deviceInfo: 'Windows 10 - Chrome 126.0',
-      purpose: 'Pre-appointment record review',
-      status: 'authorized'
+      status: 'authorized' as const
     }
   ];
 
@@ -191,14 +285,46 @@ export default function PatientAccessLogsPage() {
     const matchesAccessor = accessorFilter === 'all' || log.accessorType === accessorFilter;
     const matchesStatus = statusFilter === 'all' || log.status === statusFilter;
     
-    // Time filter logic would go here
     return matchesSearch && matchesAccessor && matchesStatus;
   });
 
-  const totalAccesses = accessLogs.length;
-  const authorizedAccesses = accessLogs.filter(log => log.status === 'authorized').length;
-  const blockedAccesses = accessLogs.filter(log => log.status === 'blocked').length;
-  const qrCodeAccesses = accessLogs.filter(log => log.qrCodeUsed).length;
+  if (loading) {
+    return (
+      <ProtectedRoute allowedRoles={['patient']}>
+        <div className="min-h-screen flex items-center justify-center">
+          <div className="text-center">
+            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
+            <p className="text-gray-600">Loading access logs...</p>
+          </div>
+        </div>
+      </ProtectedRoute>
+    );
+  }
+
+  if (error) {
+    return (
+      <ProtectedRoute allowedRoles={['patient']}>
+        <div className="space-y-6">
+          <PageHeader
+            title="Access Logs"
+            description="Monitor who has accessed your medical records and when"
+          />
+          <div className="bg-yellow-50 border border-yellow-200 rounded-md p-4">
+            <div className="flex">
+              <AlertTriangle className="h-5 w-5 text-yellow-400" />
+              <div className="ml-3">
+                <h3 className="text-sm font-medium text-yellow-800">API Connection Issue</h3>
+                <p className="text-sm text-yellow-700 mt-2">
+                  Unable to load real-time access logs. Showing demo data instead.
+                </p>
+                <p className="text-xs text-yellow-600 mt-1">Error: {error}</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </ProtectedRoute>
+    );
+  }
 
   return (
     <ProtectedRoute allowedRoles={['patient']}>
@@ -207,7 +333,7 @@ export default function PatientAccessLogsPage() {
           title="Access Logs"
           description="Monitor who has accessed your medical records and when"
         >
-          <Button variant="outline">
+          <Button variant="outline" onClick={handleExportLogs}>
             <Download className="w-4 h-4 mr-2" />
             Export Logs
           </Button>
@@ -217,25 +343,25 @@ export default function PatientAccessLogsPage() {
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
           <StatCard
             title="Total Accesses"
-            value={totalAccesses.toString()}
+            value={stats.totalAccesses.toString()}
             change={{ value: "Last 30 days", trend: "neutral" }}
             icon={<Eye className="w-6 h-6 text-blue-600" />}
           />
           <StatCard
             title="Authorized"
-            value={authorizedAccesses.toString()}
-            change={{ value: `${Math.round((authorizedAccesses / totalAccesses) * 100)}% of total`, trend: "up" }}
+            value={stats.authorizedAccesses.toString()}
+            change={{ value: `${stats.totalAccesses > 0 ? Math.round((stats.authorizedAccesses / stats.totalAccesses) * 100) : 0}% of total`, trend: "up" }}
             icon={<CheckCircle className="w-6 h-6 text-green-600" />}
           />
           <StatCard
             title="Blocked Attempts"
-            value={blockedAccesses.toString()}
+            value={stats.blockedAccesses.toString()}
             change={{ value: "Security incidents", trend: "down" }}
             icon={<AlertTriangle className="w-6 h-6 text-red-600" />}
           />
           <StatCard
             title="QR Code Uses"
-            value={qrCodeAccesses.toString()}
+            value={stats.qrCodeAccesses.toString()}
             change={{ value: "Secure access method", trend: "up" }}
             icon={<Shield className="w-6 h-6 text-purple-600" />}
           />
@@ -361,19 +487,19 @@ export default function PatientAccessLogsPage() {
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
             <div className="text-center p-4 border border-green-200 rounded-lg bg-green-50">
               <CheckCircle className="w-8 h-8 text-green-600 mx-auto mb-2" />
-              <div className="text-2xl font-bold text-green-600">{authorizedAccesses}</div>
+              <div className="text-2xl font-bold text-green-600">{stats.authorizedAccesses}</div>
               <div className="text-sm text-green-700">Authorized Accesses</div>
             </div>
             <div className="text-center p-4 border border-yellow-200 rounded-lg bg-yellow-50">
               <AlertTriangle className="w-8 h-8 text-yellow-600 mx-auto mb-2" />
               <div className="text-2xl font-bold text-yellow-600">
-                {accessLogs.filter(log => log.status === 'suspicious').length}
+                {filteredLogs.filter(log => log.status === 'suspicious').length}
               </div>
               <div className="text-sm text-yellow-700">Suspicious Activities</div>
             </div>
             <div className="text-center p-4 border border-red-200 rounded-lg bg-red-50">
               <AlertTriangle className="w-8 h-8 text-red-600 mx-auto mb-2" />
-              <div className="text-2xl font-bold text-red-600">{blockedAccesses}</div>
+              <div className="text-2xl font-bold text-red-600">{stats.blockedAccesses}</div>
               <div className="text-sm text-red-700">Blocked Attempts</div>
             </div>
           </div>

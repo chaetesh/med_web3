@@ -1,9 +1,11 @@
 'use client';
 
+import { useState, useEffect } from 'react';
 import ProtectedRoute from '@/components/ProtectedRoute';
 import PageHeader from '@/components/PageHeader';
 import { Card, StatCard } from '@/components/Card';
 import Button from '@/components/Button';
+import { HospitalApiService } from '@/lib/services/hospital.service';
 import { 
   BarChart, 
   Bar, 
@@ -32,8 +34,54 @@ import {
   Calendar,
   DollarSign,
   Heart,
-  Building
+  Building,
+  Loader2
 } from 'lucide-react';
+
+interface HospitalAnalyticsData {
+  name: string;
+  metrics: {
+    totalDoctors: number;
+    totalPatients: number;
+    totalAppointments: {
+      today: number;
+      thisWeek: number;
+      thisMonth: number;
+    };
+    records: {
+      created: number;
+      accessed: number;
+    };
+  };
+  departments: Array<{
+    name: string;
+    patients: number;
+    records: number;
+    revenue: number;
+    color: string;
+  }>;
+  utilization: {
+    doctorUtilization: number;
+    resourceUtilization: number;
+  };
+}
+
+interface BillingData {
+  summary: {
+    totalRevenue: number;
+    totalBilled: number;
+    totalPending: number;
+    insuranceClaims: number;
+  };
+  byDepartment: Array<{
+    name: string;
+    revenue: number;
+  }>;
+  byDoctor: Array<{
+    name: string;
+    revenue: number;
+  }>;
+}
 
 // Enhanced data sets
 const monthlyUsageData = [
@@ -74,11 +122,70 @@ const performanceData = [
 const COLORS = ['#0088FE', '#00C49F', '#FFBB28', '#FF8042', '#8884D8', '#82CA9D'];
 
 export default function HospitalAnalyticsPage() {
-  // Calculate summary statistics
-  const totalPatients = monthlyUsageData.reduce((sum, month) => sum + month.patients, 0);
-  const totalDoctors = Math.max(...monthlyUsageData.map(month => month.doctors));
-  const totalRecords = monthlyUsageData.reduce((sum, month) => sum + month.records, 0);
-  const totalRevenue = monthlyUsageData.reduce((sum, month) => sum + month.revenue, 0);
+  const [analyticsData, setAnalyticsData] = useState<HospitalAnalyticsData | null>(null);
+  const [billingData, setBillingData] = useState<BillingData | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const fetchData = async () => {
+      try {
+        setLoading(true);
+        setError(null);
+
+        // Fetch analytics and billing data
+        const [analyticsResponse, billingResponse] = await Promise.all([
+          HospitalApiService.getHospitalAnalytics(),
+          HospitalApiService.getBillingReports()
+        ]);
+
+        setAnalyticsData(analyticsResponse);
+        setBillingData(billingResponse);
+      } catch (err: any) {
+        console.error('Error fetching hospital data:', err);
+        setError(err.message || 'Failed to fetch hospital data');
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchData();
+  }, []);
+
+  // Generate fallback data if API data is not available
+  const getDisplayData = () => {
+    if (!analyticsData) {
+      // Return mock data as fallback
+      return {
+        totalPatients: 23890,
+        totalDoctors: 380,
+        totalRecords: 23700,
+        totalRevenue: 158500,
+        departments: departmentData,
+        monthlyUsage: monthlyUsageData,
+        dailyActivity: dailyActivityData,
+        performance: performanceData
+      };
+    }
+
+    // Transform real API data to match chart requirements
+    const departments = analyticsData.departments.length > 0 
+      ? analyticsData.departments 
+      : departmentData;
+
+    return {
+      totalPatients: analyticsData.metrics.totalPatients || 0,
+      totalDoctors: analyticsData.metrics.totalDoctors || 0,
+      totalRecords: analyticsData.metrics.records.created || 0,
+      totalRevenue: billingData?.summary.totalRevenue || 0,
+      departments,
+      monthlyUsage: monthlyUsageData, // Keep mock data for charts for now
+      dailyActivity: dailyActivityData,
+      performance: performanceData
+    };
+  };
+
+  const displayData = getDisplayData();
 
   return (
     <ProtectedRoute allowedRoles={['hospital_admin']}>
@@ -93,29 +200,51 @@ export default function HospitalAnalyticsPage() {
           </Button>
         </PageHeader>
 
+        {/* Loading State */}
+        {loading && (
+          <div className="flex items-center justify-center py-12">
+            <Loader2 className="w-8 h-8 animate-spin text-blue-600" />
+            <span className="ml-3 text-gray-600">Loading analytics data...</span>
+          </div>
+        )}
+
+        {/* Error State */}
+        {error && (
+          <div className="bg-red-50 border border-red-200 rounded-lg p-4">
+            <div className="flex items-center">
+              <div className="text-red-800">
+                <strong>Error:</strong> {error}
+              </div>
+            </div>
+            <p className="text-red-600 text-sm mt-2">
+              Showing fallback data. Please try refreshing the page.
+            </p>
+          </div>
+        )}
+
         {/* Key Performance Indicators */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
           <StatCard
             title="Total Patients"
-            value={totalPatients.toLocaleString()}
+            value={displayData.totalPatients.toLocaleString()}
             change={{ value: "8.2% vs last period", trend: "up" }}
             icon={<Users className="w-6 h-6 text-blue-600" />}
           />
           <StatCard
             title="Active Doctors"
-            value={totalDoctors.toString()}
+            value={displayData.totalDoctors.toString()}
             change={{ value: "12 new this month", trend: "up" }}
             icon={<Heart className="w-6 h-6 text-green-600" />}
           />
           <StatCard
             title="Medical Records"
-            value={totalRecords.toLocaleString()}
+            value={displayData.totalRecords.toLocaleString()}
             change={{ value: "15.3% increase", trend: "up" }}
             icon={<FileText className="w-6 h-6 text-purple-600" />}
           />
           <StatCard
             title="Revenue"
-            value={`$${totalRevenue.toLocaleString()}`}
+            value={`$${displayData.totalRevenue.toLocaleString()}`}
             change={{ value: "5.1% vs last period", trend: "up" }}
             icon={<DollarSign className="w-6 h-6 text-orange-600" />}
           />
@@ -125,7 +254,7 @@ export default function HospitalAnalyticsPage() {
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           <Card title="Monthly Patient & Doctor Trends">
             <ResponsiveContainer width="100%" height={300}>
-              <AreaChart data={monthlyUsageData}>
+              <AreaChart data={displayData.monthlyUsage}>
                 <CartesianGrid strokeDasharray="3 3" />
                 <XAxis dataKey="name" />
                 <YAxis />
@@ -156,7 +285,7 @@ export default function HospitalAnalyticsPage() {
 
           <Card title="Revenue & Records Correlation">
             <ResponsiveContainer width="100%" height={300}>
-              <LineChart data={monthlyUsageData}>
+              <LineChart data={displayData.monthlyUsage}>
                 <CartesianGrid strokeDasharray="3 3" />
                 <XAxis dataKey="name" />
                 <YAxis yAxisId="left" />
@@ -179,7 +308,7 @@ export default function HospitalAnalyticsPage() {
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           <Card title="Department Performance">
             <ResponsiveContainer width="100%" height={350}>
-              <BarChart data={departmentData} margin={{ top: 20, right: 30, left: 20, bottom: 5 }}>
+              <BarChart data={displayData.departments} margin={{ top: 20, right: 30, left: 20, bottom: 5 }}>
                 <CartesianGrid strokeDasharray="3 3" />
                 <XAxis dataKey="name" angle={-45} textAnchor="end" height={80} />
                 <YAxis />
@@ -200,7 +329,7 @@ export default function HospitalAnalyticsPage() {
             <ResponsiveContainer width="100%" height={350}>
               <PieChart>
                 <Pie
-                  data={departmentData}
+                  data={displayData.departments}
                   cx="50%"
                   cy="50%"
                   labelLine={false}
@@ -209,7 +338,7 @@ export default function HospitalAnalyticsPage() {
                   fill="#8884d8"
                   dataKey="revenue"
                 >
-                  {departmentData.map((entry, index) => (
+                  {displayData.departments.map((entry, index) => (
                     <Cell key={`cell-${index}`} fill={entry.color} />
                   ))}
                 </Pie>
@@ -224,7 +353,7 @@ export default function HospitalAnalyticsPage() {
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           <Card title="Daily Activity Pattern">
             <ResponsiveContainer width="100%" height={300}>
-              <AreaChart data={dailyActivityData}>
+              <AreaChart data={displayData.dailyActivity}>
                 <CartesianGrid strokeDasharray="3 3" />
                 <XAxis dataKey="time" />
                 <YAxis />
@@ -255,7 +384,7 @@ export default function HospitalAnalyticsPage() {
 
           <Card title="System Performance Metrics">
             <ResponsiveContainer width="100%" height={300}>
-              <RadialBarChart cx="50%" cy="50%" innerRadius="10%" outerRadius="80%" data={performanceData}>
+              <RadialBarChart cx="50%" cy="50%" innerRadius="10%" outerRadius="80%" data={displayData.performance}>
                 <RadialBar 
                   label={{ position: 'insideStart', fill: '#fff' }} 
                   background 
@@ -300,7 +429,7 @@ export default function HospitalAnalyticsPage() {
                 </tr>
               </thead>
               <tbody className="bg-white divide-y divide-gray-200">
-                {departmentData.map((dept) => (
+                {displayData.departments.map((dept) => (
                   <tr key={dept.name} className="hover:bg-gray-50">
                     <td className="px-6 py-4 whitespace-nowrap">
                       <div className="flex items-center">

@@ -31,7 +31,7 @@ async function bootstrap() {
     origin:
       configService.get('NODE_ENV') === 'production'
         ? 'https://yourdomain.com'
-        : 'http://localhost:3000',
+        : ['http://localhost:3000', 'http://localhost:3001'],
     credentials: true,
   });
   app.useGlobalPipes(

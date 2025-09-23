@@ -1,10 +1,20 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import ProtectedRoute from '@/components/ProtectedRoute';
 import PageHeader from '@/components/PageHeader';
 import { Card, StatCard } from '@/components/Card';
 import Button from '@/components/Button';
+import { 
+  MedicalRecordsService, 
+  CreateMedicalRecordDto, 
+  ApiError 
+} from '@/lib/services/medical-records.service';
+import { 
+  PatientsApiService, 
+  Patient as ApiPatient, 
+  MedicalRecord as ApiMedicalRecord
+} from '@/lib/services/patients.service';
 import { 
   Upload, 
   FileText, 
@@ -15,54 +25,47 @@ import {
   AlertTriangle,
   CheckCircle,
   X,
-  Plus,
   Eye,
   Download,
   Heart,
   Activity,
   Stethoscope,
-  Camera,
   FileImage,
-  FilePlus,
   Save
 } from 'lucide-react';
 
-interface Patient {
-  id: string;
+// Extended local types for display
+interface Patient extends ApiPatient {
   name: string;
   age: number;
   gender: 'male' | 'female' | 'other';
-  phone: string;
-  email: string;
-  medicalNumber: string;
-  lastVisit: string;
   allergies: string[];
   chronicConditions: string[];
+  walletAddress?: string; // Add wallet address property
 }
 
-interface MedicalRecord {
-  id: string;
-  patientId: string;
-  patientName: string;
-  date: string;
-  type: 'consultation' | 'lab-report' | 'imaging' | 'prescription' | 'surgery' | 'discharge';
-  title: string;
-  description: string;
-  diagnosis: string;
-  treatment: string;
-  medications: string[];
+interface MedicalRecordDisplay extends ApiMedicalRecord {
+  diagnosis?: string;
+  treatment?: string;
+  medications?: string[];
   followUpDate?: string;
-  files: {
+  files?: {
     name: string;
     type: string;
     size: string;
     url: string;
   }[];
-  status: 'draft' | 'completed' | 'reviewed';
+  patientName?: string;
 }
 
 export default function DoctorRecordsPage() {
   const [selectedPatient, setSelectedPatient] = useState<Patient | null>(null);
+  const [patients, setPatients] = useState<Patient[]>([]);
+  const [records, setRecords] = useState<MedicalRecordDisplay[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  
+  // Search and form states
   const [searchTerm, setSearchTerm] = useState('');
   const [showUploadModal, setShowUploadModal] = useState(false);
   const [recordType, setRecordType] = useState('consultation');
@@ -75,86 +78,87 @@ export default function DoctorRecordsPage() {
   const [uploadedFiles, setUploadedFiles] = useState<File[]>([]);
   const [activeTab, setActiveTab] = useState<'upload' | 'history'>('upload');
 
-  // Mock data
-  const patients: Patient[] = [
-    {
-      id: 'P001',
-      name: 'Sarah Johnson',
-      age: 39,
-      gender: 'female',
-      phone: '+1-555-0123',
-      email: 'sarah.johnson@email.com',
-      medicalNumber: 'MED-2023-001',
-      lastVisit: '2024-07-18',
-      allergies: ['Penicillin'],
-      chronicConditions: ['Hypertension']
-    },
-    {
-      id: 'P002',
-      name: 'Robert Martinez',
-      age: 51,
-      gender: 'male',
-      phone: '+1-555-0125',
-      email: 'robert.martinez@email.com',
-      medicalNumber: 'MED-2023-002',
-      lastVisit: '2024-07-20',
-      allergies: ['Latex'],
-      chronicConditions: ['Diabetes Type 2', 'High Cholesterol']
-    },
-    {
-      id: 'P003',
-      name: 'Emily Chen',
-      age: 33,
-      gender: 'female',
-      phone: '+1-555-0127',
-      email: 'emily.chen@email.com',
-      medicalNumber: 'MED-2023-003',
-      lastVisit: '2024-07-15',
-      allergies: [],
-      chronicConditions: []
-    }
-  ];
+  // Load patients on component mount
+  useEffect(() => {
+    loadPatients();
+    loadRecords();
+  }, []);
 
-  const recentRecords: MedicalRecord[] = [
-    {
-      id: 'R001',
-      patientId: 'P001',
-      patientName: 'Sarah Johnson',
-      date: '2024-07-20',
-      type: 'consultation',
-      title: 'Cardiology Consultation',
-      description: 'Patient presented with chest pain and shortness of breath',
-      diagnosis: 'Angina pectoris, stable',
-      treatment: 'Prescribed nitroglycerin, recommended lifestyle changes',
-      medications: ['Nitroglycerin 0.4mg sublingual', 'Atorvastatin 20mg daily'],
-      followUpDate: '2024-08-20',
-      files: [
-        { name: 'ECG_Report.pdf', type: 'pdf', size: '2.1 MB', url: '#' },
-        { name: 'Blood_Test.pdf', type: 'pdf', size: '1.8 MB', url: '#' }
-      ],
-      status: 'completed'
-    },
-    {
-      id: 'R002',
-      patientId: 'P002',
-      patientName: 'Robert Martinez',
-      date: '2024-07-19',
-      type: 'lab-report',
-      title: 'Diabetes Management Lab Results',
-      description: 'Quarterly diabetes monitoring lab work',
-      diagnosis: 'Type 2 Diabetes Mellitus, well controlled',
-      treatment: 'Continue current medication regimen',
-      medications: ['Metformin 1000mg twice daily', 'Glipizide 5mg daily'],
-      files: [
-        { name: 'HbA1c_Results.pdf', type: 'pdf', size: '1.2 MB', url: '#' }
-      ],
-      status: 'completed'
+  const loadPatients = async () => {
+    try {
+      setLoading(true);
+      const response = await PatientsApiService.getDoctorPatients({ limit: 50 });
+      
+      // Transform API patient data to display format
+      const transformedPatients: Patient[] = response.patients.map(patient => ({
+        ...patient,
+        name: `${patient.firstName} ${patient.lastName}`,
+        age: 0, // Age calculation will be done after getting patient details
+        gender: 'other' as const, // Default gender
+        allergies: [],
+        chronicConditions: [],
+        walletAddress: patient.walletAddress, // Include wallet address
+      }));
+      
+      setPatients(transformedPatients);
+    } catch (error) {
+      console.error('Error loading patients:', error);
+      setError(error instanceof ApiError ? error.message : 'Failed to load patients');
+    } finally {
+      setLoading(false);
     }
-  ];
+  };
+
+  const loadRecords = async () => {
+    try {
+      setLoading(true);
+      const recordsData = await MedicalRecordsService.getAllRecords();
+      
+      // Transform records to display format using the service transformer
+      const transformedRecords: MedicalRecordDisplay[] = recordsData.map(record => {
+        const baseRecord = PatientsApiService.transformMedicalRecord(record);
+        return {
+          ...baseRecord,
+          diagnosis: record.metadata?.diagnosis || '',
+          treatment: record.metadata?.treatment || '',
+          medications: record.metadata?.medications || [],
+          followUpDate: record.metadata?.followUpDate,
+          patientName: record.patientName || 'Unknown Patient',
+          files: [{
+            name: record.fileName,
+            type: record.mimeType,
+            size: `${(record.fileSize / 1024 / 1024).toFixed(1)} MB`,
+            url: `#${record.id}`,
+          }],
+        };
+      });
+      
+      setRecords(transformedRecords);
+    } catch (error) {
+      console.error('Error loading records:', error);
+      setError(error instanceof ApiError ? error.message : 'Failed to load records');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const calculateAge = (dateOfBirth?: string): number => {
+    if (!dateOfBirth) return 0;
+    const today = new Date();
+    const birthDate = new Date(dateOfBirth);
+    let age = today.getFullYear() - birthDate.getFullYear();
+    const monthDiff = today.getMonth() - birthDate.getMonth();
+    
+    if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < birthDate.getDate())) {
+      age--;
+    }
+    
+    return age;
+  };
 
   const filteredPatients = patients.filter(patient =>
     patient.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    patient.medicalNumber.toLowerCase().includes(searchTerm.toLowerCase())
+    (patient.medicalNumber && patient.medicalNumber.toLowerCase().includes(searchTerm.toLowerCase()))
   );
 
   const handlePatientSelect = (patient: Patient) => {
@@ -171,51 +175,63 @@ export default function DoctorRecordsPage() {
     setUploadedFiles(prev => prev.filter((_, i) => i !== index));
   };
 
-  const handleSubmitRecord = () => {
-    if (!selectedPatient) return;
+  const handleSubmitRecord = async () => {
+    if (!selectedPatient || uploadedFiles.length === 0) return;
 
-    const newRecord: MedicalRecord = {
-      id: `R${Date.now()}`,
-      patientId: selectedPatient.id,
-      patientName: selectedPatient.name,
-      date: new Date().toISOString().split('T')[0],
-      type: recordType as any,
-      title: recordTitle,
-      description,
-      diagnosis,
-      treatment,
-      medications: medications.split('\n').filter(med => med.trim()),
-      followUpDate: followUpDate || undefined,
-      files: uploadedFiles.map(file => ({
-        name: file.name,
-        type: file.type,
-        size: `${(file.size / 1024 / 1024).toFixed(1)} MB`,
-        url: '#'
-      })),
-      status: 'completed'
-    };
+    try {
+      setLoading(true);
 
-    console.log('Submitting record:', newRecord);
-    
-    // Reset form
-    setRecordTitle('');
-    setDescription('');
-    setDiagnosis('');
-    setTreatment('');
-    setMedications('');
-    setFollowUpDate('');
-    setUploadedFiles([]);
-    setShowUploadModal(false);
-    setSelectedPatient(null);
-    
-    alert('Medical record uploaded successfully!');
+      // Validate that patient has wallet address
+      if (!selectedPatient.walletAddress) {
+        throw new Error('Patient wallet address is required but not available. Please ensure the patient has linked their wallet.');
+      }
+
+      const recordData: CreateMedicalRecordDto = {
+        title: recordTitle,
+        description,
+        recordType: recordType as CreateMedicalRecordDto['recordType'],
+        patientId: selectedPatient._id,
+        patientAddress: selectedPatient.walletAddress || '', // Use patient's wallet address
+        metadata: {
+          diagnosis,
+          treatment,
+          medications: medications.split('\n').filter(med => med.trim()),
+          followUpDate: followUpDate || undefined,
+        },
+      };
+
+      // Upload the first file (for now, handle multiple files later)
+      await MedicalRecordsService.createRecord(recordData, uploadedFiles[0]);
+      
+      // Reset form
+      setRecordTitle('');
+      setDescription('');
+      setDiagnosis('');
+      setTreatment('');
+      setMedications('');
+      setFollowUpDate('');
+      setUploadedFiles([]);
+      setShowUploadModal(false);
+      setSelectedPatient(null);
+      
+      // Reload records
+      await loadRecords();
+      
+      alert('Medical record uploaded successfully!');
+    } catch (error) {
+      console.error('Error uploading record:', error);
+      const errorMessage = error instanceof ApiError ? error.message : 'Failed to upload record';
+      alert(`Error: ${errorMessage}`);
+    } finally {
+      setLoading(false);
+    }
   };
 
   const getRecordTypeIcon = (type: string) => {
     switch (type) {
       case 'consultation':
         return <Stethoscope className="w-4 h-4" />;
-      case 'lab-report':
+      case 'lab_result':
         return <Activity className="w-4 h-4" />;
       case 'imaging':
         return <FileImage className="w-4 h-4" />;
@@ -223,7 +239,7 @@ export default function DoctorRecordsPage() {
         return <Heart className="w-4 h-4" />;
       case 'surgery':
         return <FileText className="w-4 h-4" />;
-      case 'discharge':
+      case 'emergency':
         return <CheckCircle className="w-4 h-4" />;
       default:
         return <FileText className="w-4 h-4" />;
@@ -234,7 +250,7 @@ export default function DoctorRecordsPage() {
     switch (type) {
       case 'consultation':
         return 'bg-blue-100 text-blue-800';
-      case 'lab-report':
+      case 'lab_result':
         return 'bg-green-100 text-green-800';
       case 'imaging':
         return 'bg-purple-100 text-purple-800';
@@ -242,16 +258,38 @@ export default function DoctorRecordsPage() {
         return 'bg-orange-100 text-orange-800';
       case 'surgery':
         return 'bg-red-100 text-red-800';
-      case 'discharge':
+      case 'emergency':
         return 'bg-gray-100 text-gray-800';
       default:
         return 'bg-gray-100 text-gray-800';
     }
   };
 
-  const totalRecords = recentRecords.length;
-  const todayRecords = recentRecords.filter(r => r.date === new Date().toISOString().split('T')[0]).length;
-  const pendingRecords = recentRecords.filter(r => r.status === 'draft').length;
+  const totalRecords = records.length;
+  const todayRecords = records.filter(r => r.date === new Date().toISOString().split('T')[0]).length;
+  const pendingRecords = records.filter(r => r.status === 'pending').length;
+
+  if (error) {
+    return (
+      <ProtectedRoute allowedRoles={['doctor']}>
+        <div className="space-y-6">
+          <PageHeader
+            title="Medical Records"
+            description="Upload and manage patient medical records"
+          />
+          <div className="bg-red-50 border border-red-200 rounded-md p-4">
+            <div className="flex">
+              <AlertTriangle className="h-5 w-5 text-red-400" />
+              <div className="ml-3">
+                <h3 className="text-sm font-medium text-red-800">Error</h3>
+                <p className="text-sm text-red-700 mt-2">{error}</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </ProtectedRoute>
+    );
+  }
 
   return (
     <ProtectedRoute allowedRoles={['doctor']}>
@@ -317,7 +355,7 @@ export default function DoctorRecordsPage() {
               }`}
             >
               <FileText className="w-4 h-4 inline mr-2" />
-              Recent Records ({recentRecords.length})
+              Recent Records ({records.length})
             </button>
           </nav>
         </div>
@@ -339,38 +377,53 @@ export default function DoctorRecordsPage() {
                 </div>
               </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                {filteredPatients.map((patient) => (
-                  <div
-                    key={patient.id}
-                    onClick={() => handlePatientSelect(patient)}
-                    className="border border-gray-200 rounded-lg p-4 hover:border-blue-300 hover:bg-blue-50 transition-colors cursor-pointer"
-                  >
-                    <div className="flex items-start space-x-3">
-                      <div className="w-12 h-12 bg-blue-100 rounded-full flex items-center justify-center">
-                        <User className="w-6 h-6 text-blue-600" />
-                      </div>
-                      <div className="flex-1">
-                        <h3 className="font-semibold text-gray-900">{patient.name}</h3>
-                        <p className="text-sm text-gray-600">
-                          {patient.age} years • {patient.gender} • {patient.medicalNumber}
-                        </p>
-                        <p className="text-xs text-gray-500 mt-1">
-                          Last visit: {new Date(patient.lastVisit).toLocaleDateString()}
-                        </p>
-                        {patient.allergies.length > 0 && (
+              {loading ? (
+                <div className="text-center py-8">
+                  <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto"></div>
+                  <p className="text-gray-500 mt-2">Loading patients...</p>
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {filteredPatients.map((patient) => (
+                    <div
+                      key={patient._id}
+                      onClick={() => handlePatientSelect(patient)}
+                      className={`border rounded-lg p-4 transition-colors cursor-pointer ${
+                        patient.walletAddress 
+                          ? 'border-gray-200 hover:border-blue-300 hover:bg-blue-50' 
+                          : 'border-orange-200 bg-orange-50 hover:border-orange-300'
+                      }`}
+                    >
+                      <div className="flex items-start space-x-3">
+                        <div className={`w-10 h-10 rounded-full flex items-center justify-center ${
+                          patient.walletAddress ? 'bg-blue-100' : 'bg-orange-100'
+                        }`}>
+                          <User className={`w-5 h-5 ${
+                            patient.walletAddress ? 'text-blue-600' : 'text-orange-600'
+                          }`} />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="font-medium text-gray-900 truncate">{patient.name}</p>
+                          <p className="text-sm text-gray-500">{patient.medicalNumber}</p>
+                          <p className="text-sm text-gray-500">{patient.age} years • {patient.gender}</p>
+                          <p className="text-sm text-gray-500">{patient.phone}</p>
+                          {!patient.walletAddress && (
+                            <p className="text-xs text-orange-600 mt-1">⚠️ No wallet linked - cannot upload records</p>
+                          )}
                           <div className="mt-2">
-                            <span className="text-xs text-red-600 font-medium">Allergies: </span>
-                            <span className="text-xs text-red-600">{patient.allergies.join(', ')}</span>
+                            <p className="text-xs text-gray-400">Last visit: {patient.lastVisit}</p>
+                            {patient.allergies.length > 0 && (
+                              <p className="text-xs text-red-600">Allergies: {patient.allergies.join(', ')}</p>
+                            )}
                           </div>
-                        )}
+                        </div>
                       </div>
                     </div>
-                  </div>
-                ))}
-              </div>
+                  ))}
+                </div>
+              )}
 
-              {filteredPatients.length === 0 && (
+              {filteredPatients.length === 0 && !loading && (
                 <div className="text-center py-8">
                   <User className="w-12 h-12 text-gray-400 mx-auto mb-4" />
                   <h3 className="text-lg font-medium text-gray-900 mb-2">No patients found</h3>
@@ -384,88 +437,84 @@ export default function DoctorRecordsPage() {
         {activeTab === 'history' && (
           <div className="space-y-6">
             <Card title="Recent Medical Records">
-              <div className="space-y-4">
-                {recentRecords.map((record) => (
-                  <div key={record.id} className="border border-gray-200 rounded-lg p-4">
-                    <div className="flex items-start justify-between mb-3">
-                      <div className="flex items-start space-x-3">
-                        <div className="w-12 h-12 bg-blue-100 rounded-full flex items-center justify-center">
-                          {getRecordTypeIcon(record.type)}
-                        </div>
-                        <div className="flex-1">
-                          <div className="flex items-center space-x-2 mb-1">
-                            <h3 className="font-semibold text-gray-900">{record.title}</h3>
-                            <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${getRecordTypeColor(record.type)}`}>
-                              {record.type.replace('-', ' ')}
-                            </span>
+              {loading ? (
+                <div className="text-center py-8">
+                  <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto"></div>
+                  <p className="text-gray-500 mt-2">Loading records...</p>
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  {records.map((record) => (
+                    <div key={record.id} className="border border-gray-200 rounded-lg p-4">
+                      <div className="flex items-start justify-between mb-3">
+                        <div className="flex items-start space-x-3">
+                          <div className={`p-2 rounded-lg ${getRecordTypeColor(record.recordType)}`}>
+                            {getRecordTypeIcon(record.recordType)}
                           </div>
-                          <p className="text-sm text-gray-600 mb-1">Patient: {record.patientName}</p>
-                          <p className="text-sm text-gray-500">
-                            {new Date(record.date).toLocaleDateString()} • Status: {record.status}
-                          </p>
+                          <div>
+                            <h3 className="font-medium text-gray-900">{record.title}</h3>
+                            <p className="text-sm text-gray-600">{record.patientName}</p>
+                            <p className="text-sm text-gray-500">{new Date(record.date).toLocaleDateString()}</p>
+                          </div>
                         </div>
+                        <span className={`px-2 py-1 text-xs font-medium rounded-full ${
+                          record.status === 'stored' ? 'bg-green-100 text-green-800' : 
+                          record.status === 'pending' ? 'bg-yellow-100 text-yellow-800' : 
+                          'bg-red-100 text-red-800'
+                        }`}>
+                          {record.status}
+                        </span>
                       </div>
-                      <div className="flex space-x-2">
-                        <button className="p-1 text-blue-600 hover:text-blue-800">
-                          <Eye className="w-4 h-4" />
-                        </button>
-                        <button className="p-1 text-green-600 hover:text-green-800">
-                          <Download className="w-4 h-4" />
-                        </button>
-                      </div>
-                    </div>
 
-                    <div className="mb-3">
-                      <p className="text-sm text-gray-700 mb-2">{record.description}</p>
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
-                        <div>
-                          <span className="font-medium text-gray-700">Diagnosis:</span>
-                          <p className="text-gray-600">{record.diagnosis}</p>
-                        </div>
-                        <div>
-                          <span className="font-medium text-gray-700">Treatment:</span>
-                          <p className="text-gray-600">{record.treatment}</p>
-                        </div>
-                      </div>
-                    </div>
-
-                    {record.medications.length > 0 && (
                       <div className="mb-3">
-                        <span className="text-sm font-medium text-gray-700">Medications:</span>
-                        <ul className="list-disc list-inside text-sm text-gray-600 mt-1">
-                          {record.medications.map((med, index) => (
-                            <li key={index}>{med}</li>
-                          ))}
-                        </ul>
+                        <p className="text-sm text-gray-600 mb-2">{record.description}</p>
+                        {record.diagnosis && (
+                          <div className="mb-2">
+                            <span className="text-sm font-medium text-gray-900">Diagnosis: </span>
+                            <span className="text-sm text-gray-600">{record.diagnosis}</span>
+                          </div>
+                        )}
                       </div>
-                    )}
 
-                    {record.files.length > 0 && (
-                      <div className="mb-3">
-                        <span className="text-sm font-medium text-gray-700">Attached Files:</span>
-                        <div className="flex flex-wrap gap-2 mt-1">
-                          {record.files.map((file, index) => (
-                            <div key={index} className="flex items-center space-x-2 bg-gray-100 rounded-lg px-3 py-1">
-                              <FileText className="w-4 h-4 text-gray-500" />
-                              <span className="text-sm text-gray-700">{file.name}</span>
-                              <span className="text-xs text-gray-500">({file.size})</span>
-                            </div>
-                          ))}
+                      {record.medications && record.medications.length > 0 && (
+                        <div className="mb-3">
+                          <span className="text-sm font-medium text-gray-900">Medications: </span>
+                          <div className="flex flex-wrap gap-1 mt-1">
+                            {record.medications.map((med, idx) => (
+                              <span key={idx} className="px-2 py-1 bg-blue-50 text-blue-700 text-xs rounded">
+                                {med}
+                              </span>
+                            ))}
+                          </div>
                         </div>
-                      </div>
-                    )}
+                      )}
 
-                    {record.followUpDate && (
-                      <div className="text-sm text-blue-600">
-                        <Calendar className="w-4 h-4 inline mr-1" />
-                        Follow-up scheduled: {new Date(record.followUpDate).toLocaleDateString()}
-                      </div>
-                    )}
-                  </div>
-                ))}
-              </div>
+                      {record.files && record.files.length > 0 && (
+                        <div className="mb-3">
+                          <span className="text-sm font-medium text-gray-900">Files: </span>
+                          <div className="flex flex-wrap gap-2 mt-1">
+                            {record.files.map((file, idx) => (
+                              <div key={idx} className="flex items-center space-x-1 px-2 py-1 bg-gray-50 rounded text-xs">
+                                <FileText className="w-3 h-3 text-gray-400" />
+                                <span>{file.name} ({file.size})</span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
 
-              {recentRecords.length === 0 && (
+                      {record.followUpDate && (
+                        <div className="text-sm text-blue-600">
+                          <Calendar className="w-4 h-4 inline mr-1" />
+                          Follow-up scheduled: {new Date(record.followUpDate).toLocaleDateString()}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {records.length === 0 && !loading && (
                 <div className="text-center py-8">
                   <FileText className="w-12 h-12 text-gray-400 mx-auto mb-4" />
                   <h3 className="text-lg font-medium text-gray-900 mb-2">No records found</h3>
@@ -501,7 +550,7 @@ export default function DoctorRecordsPage() {
                 <div className="space-y-4">
                   <div className="grid grid-cols-2 gap-4">
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">
+                      <label className="block text-sm font-medium text-gray-700 mb-1">
                         Record Type
                       </label>
                       <select
@@ -510,17 +559,17 @@ export default function DoctorRecordsPage() {
                         className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                       >
                         <option value="consultation">Consultation</option>
-                        <option value="lab-report">Lab Report</option>
+                        <option value="lab_result">Lab Result</option>
                         <option value="imaging">Imaging</option>
                         <option value="prescription">Prescription</option>
-                        <option value="surgery">Surgery Report</option>
-                        <option value="discharge">Discharge Summary</option>
+                        <option value="surgery">Surgery</option>
+                        <option value="emergency">Emergency</option>
                       </select>
                     </div>
 
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">
-                        Follow-up Date (Optional)
+                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                        Follow-up Date
                       </label>
                       <input
                         type="date"
@@ -532,7 +581,7 @@ export default function DoctorRecordsPage() {
                   </div>
 
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
                       Record Title
                     </label>
                     <input
@@ -545,7 +594,7 @@ export default function DoctorRecordsPage() {
                   </div>
 
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
                       Description
                     </label>
                     <textarea
@@ -558,7 +607,7 @@ export default function DoctorRecordsPage() {
                   </div>
 
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
                       Diagnosis
                     </label>
                     <textarea
@@ -571,8 +620,8 @@ export default function DoctorRecordsPage() {
                   </div>
 
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                      Treatment Plan
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Treatment
                     </label>
                     <textarea
                       value={treatment}
@@ -584,8 +633,8 @@ export default function DoctorRecordsPage() {
                   </div>
 
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                      Medications (one per line)
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Medications
                     </label>
                     <textarea
                       value={medications}
@@ -597,45 +646,27 @@ export default function DoctorRecordsPage() {
                   </div>
 
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                      Attach Files
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Upload Files
                     </label>
-                    <div className="border-2 border-dashed border-gray-300 rounded-lg p-6">
-                      <div className="text-center">
-                        <Camera className="w-8 h-8 text-gray-400 mx-auto mb-2" />
-                        <p className="text-sm text-gray-600 mb-2">
-                          Drop files here or click to upload
-                        </p>
-                        <input
-                          type="file"
-                          multiple
-                          accept=".pdf,.jpg,.jpeg,.png,.doc,.docx"
-                          onChange={handleFileUpload}
-                          className="hidden"
-                          id="file-upload"
-                        />
-                        <label
-                          htmlFor="file-upload"
-                          className="inline-flex items-center px-3 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 cursor-pointer"
-                        >
-                          <Upload className="w-4 h-4 mr-2" />
-                          Choose Files
-                        </label>
-                      </div>
-                    </div>
+                    <input
+                      type="file"
+                      onChange={handleFileUpload}
+                      multiple
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                      accept=".pdf,.jpg,.jpeg,.png,.doc,.docx,.dicom"
+                    />
 
                     {uploadedFiles.length > 0 && (
-                      <div className="mt-4 space-y-2">
+                      <div className="mt-2 space-y-2">
                         {uploadedFiles.map((file, index) => (
-                          <div key={index} className="flex items-center justify-between p-2 bg-gray-100 rounded-lg">
+                          <div key={index} className="flex items-center justify-between p-2 bg-gray-50 rounded">
                             <div className="flex items-center space-x-2">
-                              <FileText className="w-4 h-4 text-gray-500" />
-                              <span className="text-sm text-gray-700">{file.name}</span>
-                              <span className="text-xs text-gray-500">
-                                ({(file.size / 1024 / 1024).toFixed(1)} MB)
-                              </span>
+                              <FileText className="w-4 h-4 text-gray-400" />
+                              <span className="text-sm text-gray-600">{file.name}</span>
+                              <span className="text-xs text-gray-400">({(file.size / 1024 / 1024).toFixed(1)} MB)</span>
                             </div>
-                            <button
+                            <button 
                               onClick={() => removeFile(index)}
                               className="text-red-500 hover:text-red-700"
                             >
@@ -655,11 +686,20 @@ export default function DoctorRecordsPage() {
                   <Button 
                     variant="primary" 
                     onClick={handleSubmitRecord}
-                    disabled={!recordTitle.trim() || !description.trim() || !diagnosis.trim()}
+                    disabled={!recordTitle.trim() || !description.trim() || uploadedFiles.length === 0 || loading}
                     className="flex-1"
                   >
-                    <Save className="w-4 h-4 mr-2" />
-                    Save Record
+                    {loading ? (
+                      <>
+                        <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
+                        Uploading...
+                      </>
+                    ) : (
+                      <>
+                        <Save className="w-4 h-4 mr-2" />
+                        Save Record
+                      </>
+                    )}
                   </Button>
                 </div>
               </div>

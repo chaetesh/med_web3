@@ -2,6 +2,15 @@ import { Controller, Get, Post, Delete, Body, UseGuards, Request } from '@nestjs
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { WalletService } from './wallet.service';
 
+interface AddTransactionDto {
+  transactionHash: string;
+  type: 'sent' | 'received' | 'reward' | 'fee';
+  amount: string;
+  from: string;
+  to: string;
+  description?: string;
+}
+
 @Controller('wallet')
 @UseGuards(JwtAuthGuard)
 export class WalletController {
@@ -10,6 +19,11 @@ export class WalletController {
   @Get()
   async getUserWallet(@Request() req) {
     return this.walletService.getUserWallet(req.user.id);
+  }
+
+  @Get('status')
+  async getWalletStatus(@Request() req) {
+    return this.walletService.getWalletStatus(req.user.id);
   }
 
   @Post('connect')
@@ -23,5 +37,23 @@ export class WalletController {
   @Delete('disconnect')
   async disconnectWallet(@Request() req) {
     return this.walletService.disconnectWallet(req.user.id);
+  }
+
+  @Post('transaction')
+  async addTransaction(
+    @Request() req,
+    @Body() transactionData: AddTransactionDto,
+  ) {
+    await this.walletService.addTransaction(
+      req.user.id,
+      transactionData.transactionHash,
+      transactionData.type,
+      transactionData.amount,
+      transactionData.from,
+      transactionData.to,
+      transactionData.description
+    );
+    
+    return { success: true, message: 'Transaction recorded successfully' };
   }
 }

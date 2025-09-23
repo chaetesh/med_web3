@@ -4,6 +4,7 @@ import { Model, Types } from 'mongoose';
 import { DoctorProfile } from './schemas/doctor-profile.schema';
 import { User, UserRole } from '../users/schemas/user.schema';
 import { Appointment } from '../appointments/schemas/appointment.schema';
+import { Hospital } from '../hospitals/schemas/hospital.schema';
 
 @Injectable()
 export class DoctorsService {
@@ -14,6 +15,7 @@ export class DoctorsService {
     @InjectModel(DoctorProfile.name) private doctorProfileModel: Model<DoctorProfile>,
     @InjectModel(Appointment.name) private appointmentModel: Model<Appointment>,
     @InjectModel('MedicalRecord') private medicalRecordModel: Model<any>,
+    @InjectModel(Hospital.name) private hospitalModel: Model<Hospital>,
   ) {}
 
   async getDoctorProfile(doctorId: string): Promise<any> {
@@ -241,7 +243,8 @@ export class DoctorsService {
               firstName: '$patientDetails.firstName',
               lastName: '$patientDetails.lastName',
               email: '$patientDetails.email',
-              profileData: '$patientDetails.profileData'
+              profileData: '$patientDetails.profileData',
+              walletAddress: '$patientDetails.walletAddress'
             }
           }
         }
@@ -265,6 +268,7 @@ export class DoctorsService {
           lastName: data.patient.lastName,
           email: data.patient.email,
           phone: data.patient.profileData?.phone || 'No phone provided',
+          walletAddress: data.patient.walletAddress || null,
           lastVisit: new Date(data.lastAppointment).toISOString().split('T')[0],
           appointmentCount: data.appointmentCount,
           completedAppointments: data.completedAppointments,
@@ -337,6 +341,129 @@ export class DoctorsService {
       };
     } catch (error) {
       this.logger.error(`Error fetching patient details: ${error.message}`, error.stack);
+      throw error;
+    }
+  }
+
+  async getAllDoctorsPublic(options: {
+    page?: number;
+    limit?: number;
+    search?: string;
+    specialization?: string;
+    hospitalId?: string;
+  } = {}): Promise<any> {
+    try {
+      const { page = 1, limit = 50, search, specialization, hospitalId } = options;
+      const skip = (page - 1) * limit;
+
+      // Build query
+      const query: any = { 
+        role: UserRole.DOCTOR,
+        isActive: true
+      };
+
+      if (hospitalId) {
+        // Validate ObjectId format before querying
+        if (Types.ObjectId.isValid(hospitalId)) {
+          query.hospitalId = hospitalId;
+        } else {
+          // If invalid ObjectId, return empty results
+          return {
+            doctors: [],
+            pagination: {
+              total: 0,
+              page,
+              limit,
+              pages: 0
+            }
+          };
+        }
+      }
+
+      if (search) {
+        query.$or = [
+          { firstName: new RegExp(search, 'i') },
+          { lastName: new RegExp(search, 'i') },
+          { email: new RegExp(search, 'i') }
+        ];
+      }
+
+      // Get doctors with basic info (without populate to avoid ObjectId cast errors)
+      const doctors = await this.userModel
+        .find(query)
+        .skip(skip)
+        .limit(limit)
+        .select('firstName lastName email hospitalId profileData')
+        .exec();
+
+      const total = await this.userModel.countDocuments(query);
+
+      // Get additional profile info and hospital info separately for each doctor
+      const doctorsWithProfiles = await Promise.all(
+        doctors.map(async (doctor) => {
+          const profile = await this.doctorProfileModel.findOne({ userId: doctor._id });
+          
+          // Handle hospital info separately to avoid ObjectId cast errors
+          let hospitalInfo: any = null;
+          if (doctor.hospitalId && Types.ObjectId.isValid(doctor.hospitalId)) {
+            try {
+              const hospital = await this.hospitalModel.findById(doctor.hospitalId).select('name city state');
+              if (hospital) {
+                hospitalInfo = {
+                  _id: hospital._id,
+                  name: hospital.name,
+                  city: hospital.city,
+                  state: hospital.state
+                };
+              }
+            } catch (error) {
+              // If hospital fetch fails, just leave it null
+              this.logger.warn(`Failed to fetch hospital for doctor ${doctor._id}: ${error.message}`);
+            }
+          }
+          
+          return {
+            _id: doctor._id,
+            firstName: doctor.firstName,
+            lastName: doctor.lastName,
+            email: doctor.email,
+            specialization: profile?.specialization || 'General Practitioner',
+            department: profile?.department || 'General',
+            experience: profile?.experience || 0,
+            qualifications: profile?.qualifications ? profile.qualifications.split(', ') : [],
+            languages: profile?.languages || ['English'],
+            isAvailableForConsultation: profile?.isAvailableForConsultation !== false,
+            consultationFees: profile?.consultationFees || {
+              inPerson: 100,
+              virtual: 75
+            },
+            hospital: hospitalInfo,
+            rating: 4.2 + Math.random() * 0.8, // Mock rating for demo
+            reviewCount: Math.floor(Math.random() * 100) + 10,
+            profilePicture: profile?.profilePicture || null
+          };
+        })
+      );
+
+      // Filter by specialization if provided
+      let filteredDoctors = doctorsWithProfiles;
+      if (specialization) {
+        filteredDoctors = doctorsWithProfiles.filter(doctor =>
+          doctor.specialization.toLowerCase().includes(specialization.toLowerCase())
+        );
+      }
+
+      return {
+        doctors: filteredDoctors,
+        pagination: {
+          total: specialization ? filteredDoctors.length : total,
+          page,
+          limit,
+          pages: Math.ceil((specialization ? filteredDoctors.length : total) / limit)
+        }
+      };
+    } catch (error) {
+      this.logger.error(`Error fetching public doctors: ${error.message}`, error.stack);
       throw error;
     }
   }

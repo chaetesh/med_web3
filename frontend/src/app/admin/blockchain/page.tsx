@@ -1,10 +1,16 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import ProtectedRoute from '@/components/ProtectedRoute';
 import PageHeader from '@/components/PageHeader';
 import { Card, StatCard } from '@/components/Card';
 import Button from '@/components/Button';
+import { 
+  BlockchainApiService, 
+  BlockchainStats, 
+  BlockchainTransaction,
+  ApiErrorClass 
+} from '@/lib/services/blockchain.service';
 import { 
   Database, 
   Activity, 
@@ -20,95 +26,106 @@ import {
   Copy
 } from 'lucide-react';
 
-interface BlockchainStats {
-  totalTransactions: number;
-  pendingTransactions: number;
-  successfulTransactions: number;
-  failedTransactions: number;
-  averageBlockTime: number;
-  networkStatus: 'healthy' | 'congested' | 'degraded';
-  lastBlockHeight: number;
-  gasPrice: number;
-}
-
-interface Transaction {
-  id: string;
-  hash: string;
-  blockNumber: number;
-  timestamp: string;
-  type: 'record_hash' | 'access_grant' | 'revoke_access' | 'user_registration';
-  status: 'confirmed' | 'pending' | 'failed';
-  gasUsed: number;
-  gasPrice: number;
-  fromAddress: string;
-  description: string;
-}
-
 export default function BlockchainStatusPage() {
   const [refreshing, setRefreshing] = useState(false);
+  const [stats, setStats] = useState<BlockchainStats | null>(null);
+  const [recentTransactions, setRecentTransactions] = useState<BlockchainTransaction[]>([]);
+  const [transactionSummary, setTransactionSummary] = useState<any>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  // Mock data - replace with actual blockchain API calls
-  const stats: BlockchainStats = {
-    totalTransactions: 8765,
-    pendingTransactions: 23,
-    successfulTransactions: 8742,
-    failedTransactions: 23,
-    averageBlockTime: 2.1,
-    networkStatus: 'healthy',
-    lastBlockHeight: 45123678,
-    gasPrice: 20
-  };
+  // Load blockchain data on component mount
+  useEffect(() => {
+    loadBlockchainData();
+  }, []);
 
-  const recentTransactions: Transaction[] = [
-    {
-      id: '1',
-      hash: '0x1234...abcd',
-      blockNumber: 45123678,
-      timestamp: '2024-07-20T10:30:00Z',
-      type: 'record_hash',
-      status: 'confirmed',
-      gasUsed: 21000,
-      gasPrice: 20,
-      fromAddress: '0x9876...5432',
-      description: 'Patient record hash stored for Sarah Johnson'
-    },
-    {
-      id: '2',
-      hash: '0x5678...efgh',
-      blockNumber: 45123677,
-      timestamp: '2024-07-20T10:28:00Z',
-      type: 'access_grant',
-      status: 'confirmed',
-      gasUsed: 45000,
-      gasPrice: 22,
-      fromAddress: '0x1111...2222',
-      description: 'Access granted to Dr. Smith for patient records'
-    },
-    {
-      id: '3',
-      hash: '0x9abc...def0',
-      blockNumber: 0,
-      timestamp: '2024-07-20T10:25:00Z',
-      type: 'record_hash',
-      status: 'pending',
-      gasUsed: 0,
-      gasPrice: 21,
-      fromAddress: '0x3333...4444',
-      description: 'New X-ray record hash submission'
-    },
-    {
-      id: '4',
-      hash: '0xfeda...bc98',
-      blockNumber: 0,
-      timestamp: '2024-07-20T10:20:00Z',
-      type: 'user_registration',
-      status: 'failed',
-      gasUsed: 0,
-      gasPrice: 25,
-      fromAddress: '0x5555...6666',
-      description: 'User registration transaction failed'
+  const loadBlockchainData = async () => {
+    try {
+      setLoading(true);
+      setError(null);
+      
+      // Load both blockchain status and real wallet transactions in parallel
+      const [blockchainStatus, walletTransactions] = await Promise.all([
+        BlockchainApiService.getAdminBlockchainStatus(),
+        BlockchainApiService.getAllWalletTransactions({ limit: 20 })
+      ]);
+      
+      // Transform the API response to match our component expectations
+      const transformedStats: BlockchainStats = {
+        totalTransactions: walletTransactions.summary?.totalTransactions || blockchainStatus.transactions?.month || 0,
+        pendingTransactions: blockchainStatus.transactions?.pending || 0,
+        successfulTransactions: (walletTransactions.summary?.totalTransactions || blockchainStatus.transactions?.month || 0) - (blockchainStatus.transactions?.failed || 0),
+        failedTransactions: blockchainStatus.transactions?.failed || 0,
+        averageBlockTime: 2.1, // Default for Polygon
+        networkStatus: blockchainStatus.network?.rpcStatus === 'connected' ? 'healthy' : 'degraded',
+        lastBlockHeight: blockchainStatus.network?.latestBlock || 0,
+        gasPrice: parseInt(blockchainStatus.network?.gasPrice?.replace(' gwei', '') || '0'),
+        networkName: blockchainStatus.network?.name || 'Polygon',
+        chainId: parseInt(blockchainStatus.network?.chainId || '137'),
+        contractAddresses: {
+          mediChainRegistry: blockchainStatus.contract?.address || '0x0303B82244eBDaB045E336314770b13f652BE284',
+          accessControl: blockchainStatus.contract?.address || '0x0303B82244eBDaB045E336314770b13f652BE284'
+        }
+      };
+      
+      setStats(transformedStats);
+      
+      // Store transaction summary for display
+      setTransactionSummary(walletTransactions.summary);
+      
+      // Transform wallet transactions to BlockchainTransaction format
+      const transformedTransactions: BlockchainTransaction[] = walletTransactions.transactions.map((tx: any) => {
+        // Determine transaction type based on description and type
+        let transactionType: 'record_hash' | 'access_grant' | 'revoke_access' | 'user_registration' = 'access_grant';
+        
+        if (tx.description?.toLowerCase().includes('contract interaction')) {
+          transactionType = 'record_hash';
+        } else if (tx.type === 'received') {
+          transactionType = 'access_grant';
+        } else if (tx.type === 'sent') {
+          transactionType = 'revoke_access';
+        } else if (tx.description?.toLowerCase().includes('registration')) {
+          transactionType = 'user_registration';
+        }
+
+        // Format gas amount (extract numeric value from gas string like "0.000032 ETH")
+        const gasValue = tx.gas ? parseFloat(tx.gas.replace(/[^\d.]/g, '')) : 0;
+        // Convert ETH gas value to a reasonable display number (multiply by 1000000 to show as micro-units)
+        const gasUsedDisplay = gasValue > 0 ? Math.round(gasValue * 1000000) : 0;
+
+        // Create proper description
+        const description = tx.description?.toLowerCase().includes('contract interaction') 
+          ? `${tx.user?.name || 'User'} (${tx.user?.role || 'unknown'}): ${tx.description}`
+          : `${tx.user?.name || 'User'} (${tx.user?.role || 'unknown'}): ${tx.description}`;
+
+        return {
+          id: tx.id || `tx_${Date.now()}_${Math.random()}`,
+          hash: tx.id || '0x0000000000000000000000000000000000000000000000000000000000000000',
+          blockNumber: 0, // Not available from wallet API
+          timestamp: tx.timestamp || new Date().toISOString(),
+          type: transactionType,
+          status: tx.status as 'confirmed' | 'pending' | 'failed',
+          gasUsed: gasUsedDisplay,
+          gasPrice: 0,
+          fromAddress: tx.from || '',
+          toAddress: tx.to || tx.user?.walletAddress || '',
+          description: description,
+          recordId: undefined,
+          userId: tx.user?.id,
+          errorMessage: tx.status === 'failed' ? 'Transaction failed' : undefined,
+          amount: tx.amount || '0 ETH' // Store the original amount string
+        };
+      });
+      
+      setRecentTransactions(transformedTransactions);
+      
+    } catch (error) {
+      console.error('Error loading blockchain data:', error);
+      setError(error instanceof ApiErrorClass ? error.message : 'Failed to load blockchain data');
+    } finally {
+      setLoading(false);
     }
-  ];
+  };
 
   const getStatusColor = (status: string) => {
     switch (status) {
@@ -151,6 +168,21 @@ export default function BlockchainStatusPage() {
     }
   };
 
+  const getTypeDisplayName = (type: string) => {
+    switch (type) {
+      case 'record_hash':
+        return 'record hash';
+      case 'access_grant':
+        return 'access grant';
+      case 'revoke_access':
+        return 'revoke access';
+      case 'user_registration':
+        return 'user registration';
+      default:
+        return type.replace('_', ' ');
+    }
+  };
+
   const getNetworkStatusColor = (status: string) => {
     switch (status) {
       case 'healthy':
@@ -166,13 +198,45 @@ export default function BlockchainStatusPage() {
 
   const handleRefresh = async () => {
     setRefreshing(true);
-    // Simulate API call
-    setTimeout(() => setRefreshing(false), 2000);
+    await loadBlockchainData();
+    setRefreshing(false);
   };
 
-  const copyToClipboard = (text: string) => {
-    navigator.clipboard.writeText(text);
+  const copyToClipboard = async (text: string) => {
+    const success = await BlockchainApiService.copyToClipboard(text);
+    if (success) {
+      // You could show a toast notification here
+      console.log('Copied to clipboard:', text);
+    }
   };
+
+  if (loading && !stats) {
+    return (
+      <ProtectedRoute allowedRoles={['system_admin']}>
+        <div className="min-h-screen flex items-center justify-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
+        </div>
+      </ProtectedRoute>
+    );
+  }
+
+  if (error && !stats) {
+    return (
+      <ProtectedRoute allowedRoles={['system_admin']}>
+        <div className="min-h-screen flex items-center justify-center">
+          <div className="text-center">
+            <AlertTriangle className="w-12 h-12 text-red-500 mx-auto mb-4" />
+            <h3 className="text-lg font-medium text-gray-900 mb-2">Failed to load blockchain data</h3>
+            <p className="text-red-600 mb-4">{error}</p>
+            <Button onClick={handleRefresh} disabled={refreshing}>
+              <RefreshCw className={`w-4 h-4 mr-2 ${refreshing ? 'animate-spin' : ''}`} />
+              Retry
+            </Button>
+          </div>
+        </div>
+      </ProtectedRoute>
+    );
+  }
 
   return (
     <ProtectedRoute allowedRoles={['system_admin']}>
@@ -202,16 +266,18 @@ export default function BlockchainStatusPage() {
           <div className="flex items-center justify-between">
             <div className="flex items-center space-x-4">
               <div className="flex items-center space-x-2">
-                <Activity className={`w-5 h-5 ${getNetworkStatusColor(stats.networkStatus)}`} />
+                <Activity className={`w-5 h-5 ${stats ? getNetworkStatusColor(stats.networkStatus) : 'text-gray-400'}`} />
                 <span className="text-lg font-semibold">Network Status</span>
               </div>
-              <span className={`text-lg font-bold capitalize ${getNetworkStatusColor(stats.networkStatus)}`}>
-                {stats.networkStatus}
+              <span className={`text-lg font-bold capitalize ${stats ? getNetworkStatusColor(stats.networkStatus) : 'text-gray-400'}`}>
+                {stats ? stats.networkStatus : 'Loading...'}
               </span>
             </div>
             <div className="text-right">
               <div className="text-sm text-gray-500">Latest Block</div>
-              <div className="text-lg font-semibold text-gray-900">#{stats.lastBlockHeight.toLocaleString()}</div>
+              <div className="text-lg font-semibold text-gray-900">
+                #{stats ? stats.lastBlockHeight.toLocaleString() : 'Loading...'}
+              </div>
             </div>
           </div>
         </Card>
@@ -220,25 +286,25 @@ export default function BlockchainStatusPage() {
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
           <StatCard
             title="Total Transactions"
-            value={stats.totalTransactions.toLocaleString()}
+            value={stats ? stats.totalTransactions.toLocaleString() : '0'}
             change={{ value: "+123 today", trend: "up" }}
             icon={<Database className="w-6 h-6 text-blue-600" />}
           />
           <StatCard
             title="Pending Transactions"
-            value={stats.pendingTransactions.toString()}
+            value={stats ? stats.pendingTransactions.toString() : '0'}
             change={{ value: "In mempool", trend: "neutral" }}
             icon={<Clock className="w-6 h-6 text-yellow-600" />}
           />
           <StatCard
             title="Success Rate"
-            value={`${Math.round((stats.successfulTransactions / stats.totalTransactions) * 100)}%`}
+            value={stats ? `${Math.round((stats.successfulTransactions / stats.totalTransactions) * 100)}%` : '0%'}
             change={{ value: "High reliability", trend: "up" }}
             icon={<CheckCircle className="w-6 h-6 text-green-600" />}
           />
           <StatCard
             title="Avg Block Time"
-            value={`${stats.averageBlockTime}s`}
+            value={stats ? `${stats.averageBlockTime}s` : '0s'}
             change={{ value: "Optimal performance", trend: "up" }}
             icon={<TrendingUp className="w-6 h-6 text-purple-600" />}
           />
@@ -258,127 +324,148 @@ export default function BlockchainStatusPage() {
               </div>
               <div className="flex justify-between items-center">
                 <span className="text-sm text-gray-600">Current Gas Price</span>
-                <span className="font-medium">{stats.gasPrice} Gwei</span>
+                <span className="font-medium">{stats ? stats.gasPrice : 0} Gwei</span>
               </div>
               <div className="flex justify-between items-center">
                 <span className="text-sm text-gray-600">Block Height</span>
-                <span className="font-medium">#{stats.lastBlockHeight.toLocaleString()}</span>
+                <span className="font-medium">#{stats ? stats.lastBlockHeight.toLocaleString() : '0'}</span>
               </div>
               <div className="flex justify-between items-center">
                 <span className="text-sm text-gray-600">Average Block Time</span>
-                <span className="font-medium">{stats.averageBlockTime} seconds</span>
+                <span className="font-medium">{stats ? stats.averageBlockTime : 0} seconds</span>
               </div>
             </div>
           </Card>
 
-          <Card title="Transaction Types">
+          <Card title="Transaction Summary">
             <div className="space-y-4">
               <div className="flex justify-between items-center">
-                <span className="text-sm text-gray-600">Record Hashes</span>
-                <span className="font-medium">6,234</span>
+                <span className="text-sm text-gray-600">Total Value</span>
+                <span className="font-medium">{transactionSummary?.totalValue || '0 ETH'}</span>
               </div>
               <div className="flex justify-between items-center">
-                <span className="text-sm text-gray-600">Access Grants</span>
-                <span className="font-medium">1,567</span>
+                <span className="text-sm text-gray-600">Active Users</span>
+                <span className="font-medium">{transactionSummary?.totalUsers || 0}</span>
               </div>
               <div className="flex justify-between items-center">
-                <span className="text-sm text-gray-600">Access Revocations</span>
-                <span className="font-medium">432</span>
+                <span className="text-sm text-gray-600">Patients</span>
+                <span className="font-medium">{transactionSummary?.usersByRole?.patient || 0}</span>
               </div>
               <div className="flex justify-between items-center">
-                <span className="text-sm text-gray-600">User Registrations</span>
-                <span className="font-medium">532</span>
+                <span className="text-sm text-gray-600">Doctors</span>
+                <span className="font-medium">{transactionSummary?.usersByRole?.doctor || 0}</span>
+              </div>
+              <div className="flex justify-between items-center">
+                <span className="text-sm text-gray-600">Hospital Admins</span>
+                <span className="font-medium">{transactionSummary?.usersByRole?.hospital_admin || 0}</span>
               </div>
             </div>
           </Card>
         </div>
 
         {/* Recent Transactions */}
-        <Card title="Recent Transactions">
+        <Card title="Recent Wallet Transactions">
           <div className="overflow-x-auto">
-            <table className="min-w-full divide-y divide-gray-200">
-              <thead className="bg-gray-50">
-                <tr>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Transaction Hash
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Type
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Status
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Block
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Gas Used
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Timestamp
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Actions
-                  </th>
-                </tr>
-              </thead>
-              <tbody className="bg-white divide-y divide-gray-200">
-                {recentTransactions.map((tx) => (
-                  <tr key={tx.id} className="hover:bg-gray-50">
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      <div className="flex items-center space-x-2">
-                        <Hash className="w-4 h-4 text-gray-400" />
-                        <span className="font-mono text-sm text-gray-900">{tx.hash}</span>
+            {recentTransactions.length > 0 ? (
+              <table className="min-w-full divide-y divide-gray-200">
+                <thead className="bg-gray-50">
+                  <tr>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Transaction Hash
+                    </th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      User & Type
+                    </th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Status
+                    </th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Amount
+                    </th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Gas Used
+                    </th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Timestamp
+                    </th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Actions
+                    </th>
+                  </tr>
+                </thead>
+                <tbody className="bg-white divide-y divide-gray-200">
+                  {recentTransactions.map((tx) => (
+                    <tr key={tx.id} className="hover:bg-gray-50">
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <div className="flex items-center space-x-2">
+                          <Hash className="w-4 h-4 text-gray-400" />
+                          <span className="font-mono text-sm text-gray-900">
+                            {BlockchainApiService.formatHash(tx.hash)}
+                          </span>
+                          <button 
+                            onClick={() => copyToClipboard(tx.hash)}
+                            className="text-gray-400 hover:text-gray-600"
+                          >
+                            <Copy className="w-4 h-4" />
+                          </button>
+                        </div>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <div className="text-sm text-gray-900">{tx.description}</div>
+                        <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${getTypeColor(tx.type)}`}>
+                          {getTypeDisplayName(tx.type)}
+                        </span>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <div className="flex items-center">
+                          {getStatusIcon(tx.status)}
+                          <span className={`ml-2 inline-flex px-2 py-1 text-xs font-semibold rounded-full ${getStatusColor(tx.status)}`}>
+                            {tx.status}
+                          </span>
+                        </div>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                        {tx.amount || '0 ETH'}
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                        <div className="flex items-center">
+                          <Zap className="w-4 h-4 text-gray-400 mr-1" />
+                          {tx.gasUsed ? (tx.gasUsed < 1000 ? tx.gasUsed.toString() : tx.gasUsed.toLocaleString()) : '0'}
+                        </div>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                        {new Date(tx.timestamp).toLocaleString()}
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
                         <button 
+                          className="text-blue-600 hover:text-blue-900 mr-3"
+                          onClick={() => window.open(BlockchainApiService.getExplorerUrl(tx.hash), '_blank')}
+                        >
+                          <ExternalLink className="w-4 h-4" />
+                        </button>
+                        <button 
+                          className="text-gray-600 hover:text-gray-900"
                           onClick={() => copyToClipboard(tx.hash)}
-                          className="text-gray-400 hover:text-gray-600"
                         >
                           <Copy className="w-4 h-4" />
                         </button>
-                      </div>
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${getTypeColor(tx.type)}`}>
-                        {tx.type.replace('_', ' ')}
-                      </span>
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      <div className="flex items-center">
-                        {getStatusIcon(tx.status)}
-                        <span className={`ml-2 inline-flex px-2 py-1 text-xs font-semibold rounded-full ${getStatusColor(tx.status)}`}>
-                          {tx.status}
-                        </span>
-                      </div>
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                      {tx.blockNumber ? `#${tx.blockNumber.toLocaleString()}` : '-'}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                      <div className="flex items-center">
-                        <Zap className="w-4 h-4 text-gray-400 mr-1" />
-                        {tx.gasUsed ? tx.gasUsed.toLocaleString() : '-'}
-                      </div>
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                      {new Date(tx.timestamp).toLocaleString()}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
-                      <button className="text-blue-600 hover:text-blue-900 mr-3">
-                        <ExternalLink className="w-4 h-4" />
-                      </button>
-                      <button className="text-gray-600 hover:text-gray-900">
-                        <Copy className="w-4 h-4" />
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            ) : (
+              <div className="text-center py-8">
+                <Hash className="w-12 h-12 text-gray-300 mx-auto mb-4" />
+                <p className="text-gray-500">No wallet transactions found</p>
+                <p className="text-sm text-gray-400">Transactions will appear here when users connect their wallets and make transactions</p>
+              </div>
+            )}
           </div>
         </Card>
 
         {/* Pending Transactions Alert */}
-        {stats.pendingTransactions > 20 && (
+        {stats && stats.pendingTransactions > 20 && (
           <Card className="border-yellow-200 bg-yellow-50">
             <div className="flex items-start">
               <Clock className="w-5 h-5 text-yellow-600 mt-0.5 mr-3" />
@@ -403,14 +490,22 @@ export default function BlockchainStatusPage() {
             <div className="space-y-2">
               <div className="text-sm font-medium text-gray-900">MediChain Registry</div>
               <div className="flex items-center space-x-2">
-                <span className="font-mono text-sm text-gray-600">0x1234...5678</span>
+                <span className="font-mono text-sm text-gray-600">
+                  {stats?.contractAddresses ? 
+                    BlockchainApiService.formatHash(stats.contractAddresses.mediChainRegistry) : 
+                    '0x1234...5678'
+                  }
+                </span>
                 <button 
-                  onClick={() => copyToClipboard('0x1234567890abcdef1234567890abcdef12345678')}
+                  onClick={() => copyToClipboard(stats?.contractAddresses?.mediChainRegistry || '0x1234567890abcdef1234567890abcdef12345678')}
                   className="text-gray-400 hover:text-gray-600"
                 >
                   <Copy className="w-4 h-4" />
                 </button>
-                <button className="text-blue-600 hover:text-blue-800">
+                <button 
+                  className="text-blue-600 hover:text-blue-800"
+                  onClick={() => window.open(BlockchainApiService.getExplorerUrl(stats?.contractAddresses?.mediChainRegistry || '', 'address'), '_blank')}
+                >
                   <ExternalLink className="w-4 h-4" />
                 </button>
               </div>
@@ -418,14 +513,22 @@ export default function BlockchainStatusPage() {
             <div className="space-y-2">
               <div className="text-sm font-medium text-gray-900">Access Control</div>
               <div className="flex items-center space-x-2">
-                <span className="font-mono text-sm text-gray-600">0xabcd...ef01</span>
+                <span className="font-mono text-sm text-gray-600">
+                  {stats?.contractAddresses ? 
+                    BlockchainApiService.formatHash(stats.contractAddresses.accessControl) : 
+                    '0xabcd...ef01'
+                  }
+                </span>
                 <button 
-                  onClick={() => copyToClipboard('0xabcdef0123456789abcdef0123456789abcdef01')}
+                  onClick={() => copyToClipboard(stats?.contractAddresses?.accessControl || '0xabcdef0123456789abcdef0123456789abcdef01')}
                   className="text-gray-400 hover:text-gray-600"
                 >
                   <Copy className="w-4 h-4" />
                 </button>
-                <button className="text-blue-600 hover:text-blue-800">
+                <button 
+                  className="text-blue-600 hover:text-blue-800"
+                  onClick={() => window.open(BlockchainApiService.getExplorerUrl(stats?.contractAddresses?.accessControl || '', 'address'), '_blank')}
+                >
                   <ExternalLink className="w-4 h-4" />
                 </button>
               </div>

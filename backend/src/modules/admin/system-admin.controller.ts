@@ -23,11 +23,13 @@ export class SystemAdminController {
     @Query('page') page?: number,
     @Query('limit') limit?: number,
     @Query('status') status?: string,
+    @Query('search') search?: string,
   ) {
     return this.systemAdminService.getAllHospitals({
       page,
       limit,
       status,
+      search,
     });
   }
 
@@ -51,9 +53,15 @@ export class SystemAdminController {
 
   @Get('hospitals/:id')
   async getHospitalDetails(@Param('id') hospitalId: string) {
-    // This would be implemented in hospitals service
-    // For now, we'll use a placeholder
-    return { message: 'Hospital details endpoint' };
+    return this.systemAdminService.getHospitalDetails(hospitalId);
+  }
+
+  @Put('hospitals/:id')
+  async updateHospitalInfo(
+    @Param('id') hospitalId: string,
+    @Body() updateData: any,
+  ) {
+    return this.systemAdminService.updateHospitalInfo(hospitalId, updateData);
   }
 
   @Get('users')
@@ -74,6 +82,21 @@ export class SystemAdminController {
   @Get('blockchain/status')
   async getBlockchainStatus() {
     return this.systemAdminService.getBlockchainStatus();
+  }
+
+  @Get('blockchain/transactions')
+  async getAllWalletTransactions(
+    @Query('page') page?: number,
+    @Query('limit') limit?: number,
+    @Query('userRole') userRole?: string,
+    @Query('walletAddress') walletAddress?: string,
+  ) {
+    return this.systemAdminService.getAllWalletTransactions({
+      page,
+      limit,
+      userRole,
+      walletAddress,
+    });
   }
 
   @Get('audit-logs')

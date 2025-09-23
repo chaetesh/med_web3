@@ -1,10 +1,11 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import ProtectedRoute from '@/components/ProtectedRoute';
 import PageHeader from '@/components/PageHeader';
 import { Card, StatCard } from '@/components/Card';
 import Button from '@/components/Button';
+import { SystemAdminApiService, AdminHospital } from '@/lib/services/system-admin.service';
 import { 
   Building2, 
   Search, 
@@ -17,87 +18,103 @@ import {
   Plus,
   Eye,
   Edit,
-  Ban
+  Ban,
+  Loader2
 } from 'lucide-react';
 
-interface Hospital {
+interface Hospital extends AdminHospital {
   id: string;
-  name: string;
-  address: string;
-  city: string;
-  email: string;
-  phone: string;
-  status: 'approved' | 'pending' | 'rejected';
-  totalDoctors: number;
-  totalPatients: number;
-  monthlyRecords: number;
-  registeredAt: string;
-  adminName: string;
 }
 
 export default function HospitalManagementPage() {
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
+  const [hospitals, setHospitals] = useState<AdminHospital[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [page, setPage] = useState(1);
+  const [totalHospitals, setTotalHospitals] = useState(0);
+  const [selectedHospital, setSelectedHospital] = useState<AdminHospital | null>(null);
+  const [showDetailsModal, setShowDetailsModal] = useState(false);
+  const [showAddModal, setShowAddModal] = useState(false);
+  const limit = 10;
 
-  // Mock data - replace with actual API calls
-  const hospitals: Hospital[] = [
-    {
-      id: '1',
-      name: 'City General Hospital',
-      address: '123 Healthcare Ave',
-      city: 'New York',
-      email: 'admin@citygeneral.com',
-      phone: '+1-555-0123',
-      status: 'approved',
-      totalDoctors: 45,
-      totalPatients: 1247,
-      monthlyRecords: 523,
-      registeredAt: '2024-01-15',
-      adminName: 'Dr. Sarah Chen'
-    },
-    {
-      id: '2',
-      name: 'St. Mary Medical Center',
-      address: '456 Wellness Blvd',
-      city: 'Los Angeles',
-      email: 'contact@stmary.org',
-      phone: '+1-555-0124',
-      status: 'approved',
-      totalDoctors: 67,
-      totalPatients: 2104,
-      monthlyRecords: 842,
-      registeredAt: '2024-01-20',
-      adminName: 'Michael Rodriguez'
-    },
-    {
-      id: '3',
-      name: 'Metro Emergency Hospital',
-      address: '789 Emergency St',
-      city: 'Chicago',
-      email: 'info@metroemergency.com',
-      phone: '+1-555-0125',
-      status: 'pending',
-      totalDoctors: 23,
-      totalPatients: 567,
-      monthlyRecords: 234,
-      registeredAt: '2024-07-18',
-      adminName: 'Dr. Jennifer Park'
-    },
-    {
-      id: '4',
-      name: 'Community Health Clinic',
-      address: '321 Community Dr',
-      city: 'Houston',
-      email: 'admin@communityhc.org',
-      phone: '+1-555-0126',
-      status: 'rejected',
-      totalDoctors: 12,
-      totalPatients: 234,
-      monthlyRecords: 67,
-      registeredAt: '2024-07-10',
-      adminName: 'Robert Kim'
+  // Fetch hospitals data
+  const fetchHospitals = async () => {
+    try {
+      setLoading(true);
+      setError(null);
+      
+      const response = await SystemAdminApiService.getHospitals({
+        page,
+        limit,
+        status: statusFilter === 'all' ? undefined : statusFilter,
+        search: searchTerm || undefined,
+      });
+      
+      setHospitals(response.hospitals);
+      setTotalHospitals(response.total);
+    } catch (err: any) {
+      console.error('Error fetching hospitals:', err);
+      setError(err.message || 'Failed to fetch hospitals');
+      setHospitals([]);
+    } finally {
+      setLoading(false);
     }
-  ];
+  };
+
+  // Fetch hospitals on component mount and when filters change
+  useEffect(() => {
+    fetchHospitals();
+  }, [page, statusFilter]);
+
+  // Handle search with debouncing
+  useEffect(() => {
+    const timeoutId = setTimeout(() => {
+      setPage(1); // Reset to first page when searching
+      fetchHospitals();
+    }, 500);
+
+    return () => clearTimeout(timeoutId);
+  }, [searchTerm]);
+
+  // Handle approve hospital
+  const handleApproveHospital = async (hospitalId: string) => {
+    try {
+      await SystemAdminApiService.updateHospitalStatus(hospitalId, 'approved', 'Hospital approved by system admin');
+      fetchHospitals(); // Refresh the list
+    } catch (err: any) {
+      console.error('Error approving hospital:', err);
+      setError(err.message || 'Failed to approve hospital');
+    }
+  };
+
+  // Handle reject hospital
+  const handleRejectHospital = async (hospitalId: string) => {
+    try {
+      await SystemAdminApiService.updateHospitalStatus(hospitalId, 'rejected', 'Hospital rejected by system admin');
+      fetchHospitals(); // Refresh the list
+    } catch (err: any) {
+      console.error('Error rejecting hospital:', err);
+      setError(err.message || 'Failed to reject hospital');
+    }
+  };
+
+  // Handle view hospital details
+  const handleViewDetails = async (hospital: AdminHospital) => {
+    setSelectedHospital(hospital);
+    setShowDetailsModal(true);
+  };
+
+  // Handle add hospital
+  const handleAddHospital = () => {
+    setShowAddModal(true);
+  };
+
+  // Calculate statistics
+  const approvedHospitals = hospitals.filter(h => h.status === 'approved').length;
+  const pendingHospitals = hospitals.filter(h => h.status === 'pending').length;
+  const totalDoctors = hospitals.reduce((sum, h) => sum + h.totalDoctors, 0);
 
   const getStatusIcon = (status: string) => {
     switch (status) {
@@ -120,24 +137,14 @@ export default function HospitalManagementPage() {
         return 'bg-yellow-100 text-yellow-800';
       case 'rejected':
         return 'bg-red-100 text-red-800';
+      case 'suspended':
+        return 'bg-orange-100 text-orange-800';
       default:
         return 'bg-gray-100 text-gray-800';
     }
   };
 
-  const filteredHospitals = hospitals.filter(hospital => {
-    const matchesSearch = hospital.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                         hospital.city.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                         hospital.adminName.toLowerCase().includes(searchTerm.toLowerCase());
-    const matchesStatus = statusFilter === 'all' || hospital.status === statusFilter;
-    
-    return matchesSearch && matchesStatus;
-  });
-
-  const totalHospitals = hospitals.length;
-  const approvedHospitals = hospitals.filter(h => h.status === 'approved').length;
-  const pendingHospitals = hospitals.filter(h => h.status === 'pending').length;
-  const totalDoctors = hospitals.reduce((sum, h) => sum + h.totalDoctors, 0);
+  const filteredHospitals = hospitals;
 
   return (
     <ProtectedRoute allowedRoles={['system_admin']}>
@@ -146,7 +153,7 @@ export default function HospitalManagementPage() {
           title="Hospital Management"
           description="Manage hospital registrations and monitor hospital activity"
         >
-          <Button variant="primary">
+          <Button variant="primary" onClick={handleAddHospital}>
             <Plus className="w-4 h-4 mr-2" />
             Add Hospital
           </Button>
@@ -157,19 +164,19 @@ export default function HospitalManagementPage() {
           <StatCard
             title="Total Hospitals"
             value={totalHospitals.toString()}
-            change={{ value: "+3 this month", trend: "up" }}
+            change={{ value: `${hospitals.length} loaded`, trend: "neutral" }}
             icon={<Building2 className="w-6 h-6 text-blue-600" />}
           />
           <StatCard
             title="Approved Hospitals"
             value={approvedHospitals.toString()}
-            change={{ value: `${Math.round((approvedHospitals / totalHospitals) * 100)}% approved`, trend: "up" }}
+            change={{ value: totalHospitals > 0 ? `${Math.round((approvedHospitals / totalHospitals) * 100)}% approved` : "0% approved", trend: "up" }}
             icon={<CheckCircle className="w-6 h-6 text-green-600" />}
           />
           <StatCard
             title="Pending Reviews"
             value={pendingHospitals.toString()}
-            change={{ value: "Requires action", trend: "neutral" }}
+            change={{ value: pendingHospitals > 0 ? "Requires action" : "All reviewed", trend: pendingHospitals > 0 ? "neutral" : "up" }}
             icon={<Clock className="w-6 h-6 text-yellow-600" />}
           />
           <StatCard
@@ -179,6 +186,19 @@ export default function HospitalManagementPage() {
             icon={<Users className="w-6 h-6 text-purple-600" />}
           />
         </div>
+
+        {/* Error Message */}
+        {error && (
+          <Card>
+            <div className="flex items-center space-x-2 text-red-600">
+              <AlertTriangle className="w-5 h-5" />
+              <p>{error}</p>
+              <Button variant="outline" onClick={fetchHospitals}>
+                Retry
+              </Button>
+            </div>
+          </Card>
+        )}
 
         {/* Search and Filters */}
         <Card>
@@ -203,6 +223,7 @@ export default function HospitalManagementPage() {
               <option value="approved">Approved</option>
               <option value="pending">Pending</option>
               <option value="rejected">Rejected</option>
+              <option value="suspended">Suspended</option>
             </select>
 
             <Button variant="outline">
@@ -212,77 +233,109 @@ export default function HospitalManagementPage() {
         </Card>
 
         {/* Hospitals Grid */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {filteredHospitals.map((hospital) => (
-            <Card key={hospital.id} className="hover:shadow-lg transition-shadow">
-              <div className="space-y-4">
-                {/* Header */}
-                <div className="flex items-start justify-between">
-                  <div>
-                    <h3 className="font-semibold text-gray-900">{hospital.name}</h3>
-                    <div className="flex items-center mt-1 text-sm text-gray-500">
-                      <MapPin className="w-4 h-4 mr-1" />
-                      {hospital.city}
+        {loading ? (
+          <Card>
+            <div className="flex items-center justify-center py-8">
+              <Loader2 className="w-8 h-8 animate-spin text-blue-600" />
+              <span className="ml-2">Loading hospitals...</span>
+            </div>
+          </Card>
+        ) : filteredHospitals.length === 0 ? (
+          <Card>
+            <div className="text-center py-8">
+              <Building2 className="w-12 h-12 text-gray-400 mx-auto mb-4" />
+              <h3 className="text-lg font-medium text-gray-900 mb-2">No hospitals found</h3>
+              <p className="text-gray-600">
+                {searchTerm || statusFilter !== 'all' 
+                  ? 'Try adjusting your search filters' 
+                  : 'No hospitals have been registered yet'}
+              </p>
+            </div>
+          </Card>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            {filteredHospitals.map((hospital) => (
+              <Card key={hospital._id} className="hover:shadow-lg transition-shadow">
+                <div className="space-y-4">
+                  {/* Header */}
+                  <div className="flex items-start justify-between">
+                    <div>
+                      <h3 className="font-semibold text-gray-900">{hospital.name}</h3>
+                      <div className="flex items-center mt-1 text-sm text-gray-500">
+                        <MapPin className="w-4 h-4 mr-1" />
+                        {hospital.city}
+                      </div>
+                    </div>
+                    <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${getStatusColor(hospital.status)}`}>
+                      {getStatusIcon(hospital.status)}
+                      <span className="ml-1 capitalize">{hospital.status}</span>
+                    </span>
+                  </div>
+
+                  {/* Contact Info */}
+                  <div className="space-y-1 text-sm text-gray-600">
+                    <p>{hospital.address}</p>
+                    <p>{hospital.email}</p>
+                    <p>{hospital.phone}</p>
+                    <p><span className="font-medium">Admin:</span> {hospital.adminName}</p>
+                  </div>
+
+                  {/* Stats */}
+                  <div className="grid grid-cols-3 gap-4 pt-4 border-t border-gray-200">
+                    <div className="text-center">
+                      <div className="text-lg font-semibold text-gray-900">{hospital.totalDoctors}</div>
+                      <div className="text-xs text-gray-500">Doctors</div>
+                    </div>
+                    <div className="text-center">
+                      <div className="text-lg font-semibold text-gray-900">{hospital.totalPatients}</div>
+                      <div className="text-xs text-gray-500">Patients</div>
+                    </div>
+                    <div className="text-center">
+                      <div className="text-lg font-semibold text-gray-900">{hospital.monthlyRecords}</div>
+                      <div className="text-xs text-gray-500">Records/Month</div>
                     </div>
                   </div>
-                  <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${getStatusColor(hospital.status)}`}>
-                    {getStatusIcon(hospital.status)}
-                    <span className="ml-1 capitalize">{hospital.status}</span>
-                  </span>
-                </div>
 
-                {/* Contact Info */}
-                <div className="space-y-1 text-sm text-gray-600">
-                  <p>{hospital.address}</p>
-                  <p>{hospital.email}</p>
-                  <p>{hospital.phone}</p>
-                  <p><span className="font-medium">Admin:</span> {hospital.adminName}</p>
-                </div>
-
-                {/* Stats */}
-                <div className="grid grid-cols-3 gap-4 pt-4 border-t border-gray-200">
-                  <div className="text-center">
-                    <div className="text-lg font-semibold text-gray-900">{hospital.totalDoctors}</div>
-                    <div className="text-xs text-gray-500">Doctors</div>
-                  </div>
-                  <div className="text-center">
-                    <div className="text-lg font-semibold text-gray-900">{hospital.totalPatients}</div>
-                    <div className="text-xs text-gray-500">Patients</div>
-                  </div>
-                  <div className="text-center">
-                    <div className="text-lg font-semibold text-gray-900">{hospital.monthlyRecords}</div>
-                    <div className="text-xs text-gray-500">Records/Month</div>
-                  </div>
-                </div>
-
-                {/* Actions */}
-                <div className="flex justify-between items-center pt-4 border-t border-gray-200">
-                  <span className="text-xs text-gray-500">
-                    Registered: {new Date(hospital.registeredAt).toLocaleDateString()}
-                  </span>
-                  <div className="flex space-x-2">
-                    <button className="p-1 text-blue-600 hover:text-blue-800">
-                      <Eye className="w-4 h-4" />
-                    </button>
-                    <button className="p-1 text-green-600 hover:text-green-800">
-                      <Edit className="w-4 h-4" />
-                    </button>
-                    {hospital.status === 'pending' && (
-                      <>
-                        <Button size="sm" variant="success">
-                          Approve
-                        </Button>
-                        <Button size="sm" variant="danger">
-                          Reject
-                        </Button>
-                      </>
-                    )}
+                  {/* Actions */}
+                  <div className="flex justify-between items-center pt-4 border-t border-gray-200">
+                    <span className="text-xs text-gray-500">
+                      Registered: {new Date(hospital.registeredAt).toLocaleDateString()}
+                    </span>
+                    <div className="flex space-x-2">
+                      <button 
+                        className="p-1 text-blue-600 hover:text-blue-800"
+                        onClick={() => handleViewDetails(hospital)}
+                      >
+                        <Eye className="w-4 h-4" />
+                      </button>
+                      <button className="p-1 text-green-600 hover:text-green-800">
+                        <Edit className="w-4 h-4" />
+                      </button>
+                      {hospital.status === 'pending' && (
+                        <>
+                          <Button 
+                            size="sm" 
+                            variant="success"
+                            onClick={() => handleApproveHospital(hospital._id)}
+                          >
+                            Approve
+                          </Button>
+                          <Button 
+                            size="sm" 
+                            variant="danger"
+                            onClick={() => handleRejectHospital(hospital._id)}
+                          >
+                            Reject
+                          </Button>
+                        </>
+                      )}
+                    </div>
                   </div>
                 </div>
-              </div>
-            </Card>
-          ))}
-        </div>
+              </Card>
+            ))}
+          </div>
+        )}
 
         {/* Pending Approvals - Show if there are pending hospitals */}
         {pendingHospitals > 0 && (
@@ -299,6 +352,139 @@ export default function HospitalManagementPage() {
               </Button>
             </div>
           </Card>
+        )}
+
+        {/* Hospital Details Modal */}
+        {showDetailsModal && selectedHospital && (
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+            <div className="bg-white rounded-lg p-6 max-w-2xl w-full mx-4 max-h-[90vh] overflow-y-auto">
+              <div className="flex justify-between items-center mb-4">
+                <h2 className="text-xl font-semibold">Hospital Details</h2>
+                <button
+                  onClick={() => setShowDetailsModal(false)}
+                  className="text-gray-500 hover:text-gray-700"
+                >
+                  ✕
+                </button>
+              </div>
+              
+              <div className="space-y-4">
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700">Name</label>
+                    <p className="mt-1 text-sm text-gray-900">{selectedHospital.name}</p>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700">Status</label>
+                    <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${getStatusColor(selectedHospital.status)}`}>
+                      {selectedHospital.status}
+                    </span>
+                  </div>
+                </div>
+                
+                <div>
+                  <label className="block text-sm font-medium text-gray-700">Address</label>
+                  <p className="mt-1 text-sm text-gray-900">{selectedHospital.address}, {selectedHospital.city}</p>
+                </div>
+                
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700">Email</label>
+                    <p className="mt-1 text-sm text-gray-900">{selectedHospital.email}</p>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700">Phone</label>
+                    <p className="mt-1 text-sm text-gray-900">{selectedHospital.phone}</p>
+                  </div>
+                </div>
+                
+                <div>
+                  <label className="block text-sm font-medium text-gray-700">Admin</label>
+                  <p className="mt-1 text-sm text-gray-900">{selectedHospital.adminName}</p>
+                </div>
+                
+                <div className="grid grid-cols-3 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700">Total Doctors</label>
+                    <p className="mt-1 text-sm text-gray-900">{selectedHospital.totalDoctors}</p>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700">Total Patients</label>
+                    <p className="mt-1 text-sm text-gray-900">{selectedHospital.totalPatients}</p>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700">Monthly Records</label>
+                    <p className="mt-1 text-sm text-gray-900">{selectedHospital.monthlyRecords}</p>
+                  </div>
+                </div>
+                
+                <div>
+                  <label className="block text-sm font-medium text-gray-700">Registered</label>
+                  <p className="mt-1 text-sm text-gray-900">{new Date(selectedHospital.registeredAt).toLocaleString()}</p>
+                </div>
+              </div>
+              
+              <div className="mt-6 flex justify-end space-x-3">
+                <Button variant="outline" onClick={() => setShowDetailsModal(false)}>
+                  Close
+                </Button>
+                {selectedHospital.status === 'pending' && (
+                  <>
+                    <Button 
+                      variant="success"
+                      onClick={() => {
+                        handleApproveHospital(selectedHospital._id);
+                        setShowDetailsModal(false);
+                      }}
+                    >
+                      Approve
+                    </Button>
+                    <Button 
+                      variant="danger"
+                      onClick={() => {
+                        handleRejectHospital(selectedHospital._id);
+                        setShowDetailsModal(false);
+                      }}
+                    >
+                      Reject
+                    </Button>
+                  </>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Add Hospital Modal */}
+        {showAddModal && (
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+            <div className="bg-white rounded-lg p-6 max-w-4xl w-full mx-4 max-h-[90vh] overflow-y-auto">
+              <div className="flex justify-between items-center mb-4">
+                <h2 className="text-xl font-semibold">Add New Hospital</h2>
+                <button
+                  onClick={() => setShowAddModal(false)}
+                  className="text-gray-500 hover:text-gray-700"
+                >
+                  ✕
+                </button>
+              </div>
+              
+              <div className="space-y-4">
+                <p className="text-sm text-gray-600">
+                  This functionality would typically include a comprehensive form for hospital registration. 
+                  For now, you can redirect to a dedicated hospital registration page or implement the form inline.
+                </p>
+                <div className="flex space-x-3">
+                  <Button variant="primary" onClick={() => setShowAddModal(false)}>
+                    Go to Registration Form
+                  </Button>
+                  <Button variant="outline" onClick={() => setShowAddModal(false)}>
+                    Cancel
+                  </Button>
+                </div>
+              </div>
+            </div>
+          </div>
         )}
       </div>
     </ProtectedRoute>

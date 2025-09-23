@@ -34,7 +34,7 @@ import {
   ValidateIf,
   Min,
 } from 'class-validator';
-import { Type } from 'class-transformer';
+import { Type, Transform } from 'class-transformer';
 
 class CreateRecordDto {
   @IsNotEmpty({ message: 'Title is required' })
@@ -66,6 +66,16 @@ class CreateRecordDto {
   patientAddress: string;
 
   @IsOptional()
+  @Transform(({ value }) => {
+    if (typeof value === 'string') {
+      try {
+        return JSON.parse(value);
+      } catch {
+        return {};
+      }
+    }
+    return value || {};
+  })
   @IsObject()
   metadata?: Record<string, any>;
 }
@@ -115,10 +125,16 @@ export class MedicalRecordsController {
   async create(
     @Request() req,
     @Body() createRecordDto: CreateRecordDto,
-    @UploadedFile() file: any,
+    @UploadedFile() file?: any,
   ) {
+    // File is now optional - can create records without files for metadata-only records
     if (!file) {
-      throw new BadRequestException('File is required');
+      // Create a dummy file buffer for metadata-only records
+      file = {
+        buffer: Buffer.from('{}'),
+        originalname: 'metadata-only.json',
+        mimetype: 'application/json'
+      };
     }
 
     // Explicitly check required fields (they should already be validated by ValidationPipe)

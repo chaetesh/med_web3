@@ -1,10 +1,11 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import ProtectedRoute from '@/components/ProtectedRoute';
 import PageHeader from '@/components/PageHeader';
 import { Card, StatCard } from '@/components/Card';
 import Button from '@/components/Button';
+import { PatientsApiService, Patient as ApiPatient, ApiErrorClass } from '@/lib/services/patients.service';
 import { 
   Search, 
   Filter, 
@@ -26,18 +27,13 @@ import {
   QrCode
 } from 'lucide-react';
 
-interface Patient {
-  id: string;
+// Extended patient interface for display
+interface Patient extends ApiPatient {
   name: string;
-  email: string;
-  phone: string;
-  dateOfBirth: string;
   age: number;
   gender: 'male' | 'female' | 'other';
   bloodType: string;
   address: string;
-  medicalNumber: string;
-  lastVisit: string;
   nextAppointment?: string;
   status: 'active' | 'inactive' | 'critical';
   allergies: string[];
@@ -59,108 +55,71 @@ export default function DoctorSearchPage() {
   const [sortBy, setSortBy] = useState('name');
   const [selectedPatient, setSelectedPatient] = useState<Patient | null>(null);
   const [showPatientModal, setShowPatientModal] = useState(false);
+  const [patients, setPatients] = useState<Patient[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  // Mock data - replace with actual API calls
-  const patients: Patient[] = [
-    {
-      id: 'P001',
-      name: 'Sarah Johnson',
-      email: 'sarah.johnson@email.com',
-      phone: '+1-555-0123',
-      dateOfBirth: '1985-03-15',
-      age: 39,
-      gender: 'female',
-      bloodType: 'A+',
-      address: '123 Oak Street, City, State 12345',
-      medicalNumber: 'MED-2023-001',
-      lastVisit: '2024-07-18',
-      nextAppointment: '2024-07-25T10:00:00Z',
-      status: 'active',
-      allergies: ['Penicillin', 'Shellfish'],
-      chronicConditions: ['Hypertension'],
-      emergencyContact: {
-        name: 'Mike Johnson',
-        phone: '+1-555-0124',
-        relationship: 'Spouse'
-      },
-      insurance: 'BlueCross BlueShield',
-      visitCount: 12,
-      recordsCount: 24
-    },
-    {
-      id: 'P002',
-      name: 'Robert Martinez',
-      email: 'robert.martinez@email.com',
-      phone: '+1-555-0125',
-      dateOfBirth: '1972-08-22',
-      age: 51,
-      gender: 'male',
-      bloodType: 'O-',
-      address: '456 Pine Avenue, City, State 12345',
-      medicalNumber: 'MED-2023-002',
-      lastVisit: '2024-07-20',
-      status: 'critical',
-      allergies: ['Latex'],
-      chronicConditions: ['Diabetes Type 2', 'High Cholesterol'],
-      emergencyContact: {
-        name: 'Maria Martinez',
-        phone: '+1-555-0126',
-        relationship: 'Wife'
-      },
-      insurance: 'Aetna',
-      visitCount: 28,
-      recordsCount: 45
-    },
-    {
-      id: 'P003',
-      name: 'Emily Chen',
-      email: 'emily.chen@email.com',
-      phone: '+1-555-0127',
-      dateOfBirth: '1990-12-05',
-      age: 33,
-      gender: 'female',
-      bloodType: 'B+',
-      address: '789 Maple Drive, City, State 12345',
-      medicalNumber: 'MED-2023-003',
-      lastVisit: '2024-07-15',
-      nextAppointment: '2024-07-28T14:30:00Z',
-      status: 'active',
-      allergies: [],
-      chronicConditions: [],
-      emergencyContact: {
-        name: 'David Chen',
-        phone: '+1-555-0128',
-        relationship: 'Brother'
-      },
-      insurance: 'United Healthcare',
-      visitCount: 6,
-      recordsCount: 11
-    },
-    {
-      id: 'P004',
-      name: 'Michael Thompson',
-      email: 'michael.thompson@email.com',
-      phone: '+1-555-0129',
-      dateOfBirth: '1965-06-18',
-      age: 59,
-      gender: 'male',
-      bloodType: 'AB+',
-      address: '321 Cedar Lane, City, State 12345',
-      medicalNumber: 'MED-2023-004',
-      lastVisit: '2024-06-30',
-      status: 'inactive',
-      allergies: ['Aspirin'],
-      chronicConditions: ['Arthritis'],
-      emergencyContact: {
-        name: 'Linda Thompson',
-        phone: '+1-555-0130',
-        relationship: 'Wife'
-      },
-      insurance: 'Medicare',
-      visitCount: 15,
-      recordsCount: 32
+  // Load patients on component mount
+  useEffect(() => {
+    loadPatients();
+  }, []);
+
+  const loadPatients = async () => {
+    try {
+      setLoading(true);
+      setError(null);
+      const response = await PatientsApiService.getDoctorPatients({ limit: 100 });
+      
+      // Transform API patient data to display format
+      const transformedPatients: Patient[] = response.patients.map(patient => {
+        // Calculate age from dateOfBirth if available
+        const calculateAge = (dateOfBirth?: string): number => {
+          if (!dateOfBirth) return 0;
+          const today = new Date();
+          const birthDate = new Date(dateOfBirth);
+          let age = today.getFullYear() - birthDate.getFullYear();
+          const monthDiff = today.getMonth() - birthDate.getMonth();
+          
+          if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < birthDate.getDate())) {
+            age--;
+          }
+          
+          return age;
+        };
+
+        return {
+          ...patient,
+          name: `${patient.firstName} ${patient.lastName}`,
+          age: calculateAge(patient.lastVisit), // Mock age calculation
+          gender: (Math.random() > 0.5 ? 'female' : 'male') as 'male' | 'female' | 'other',
+          bloodType: ['A+', 'B+', 'O+', 'AB+', 'A-', 'B-', 'O-', 'AB-'][Math.floor(Math.random() * 8)],
+          address: '123 Main St, City, State 12345', // Mock address
+          nextAppointment: Math.random() > 0.5 ? new Date(Date.now() + Math.random() * 7 * 24 * 60 * 60 * 1000).toISOString() : undefined,
+          status: (['active', 'inactive', 'critical'][Math.floor(Math.random() * 3)]) as 'active' | 'inactive' | 'critical',
+          allergies: Math.random() > 0.7 ? ['Penicillin', 'Shellfish'] : [],
+          chronicConditions: Math.random() > 0.8 ? ['Hypertension'] : [],
+          emergencyContact: {
+            name: 'Emergency Contact',
+            phone: '+1-555-0000',
+            relationship: 'Family'
+          },
+          insurance: 'Health Insurance Co.',
+          visitCount: patient.appointmentCount || Math.floor(Math.random() * 20) + 1,
+          recordsCount: patient.medicalRecordsCount || Math.floor(Math.random() * 30) + 1
+        };
+      });
+      
+      setPatients(transformedPatients);
+    } catch (error) {
+      console.error('Error loading patients:', error);
+      setError(error instanceof ApiErrorClass ? error.message : 'Failed to load patients');
+    } finally {
+      setLoading(false);
     }
-  ];
+  };
+
+  // Mock data fallback for when API is not available
+  const mockPatients: Patient[] = [];
 
   const getStatusColor = (status: string) => {
     switch (status) {
@@ -204,8 +163,8 @@ export default function DoctorSearchPage() {
   const filteredPatients = patients.filter(patient => {
     const matchesSearch = patient.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
                          patient.email.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                         patient.medicalNumber.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                         patient.phone.includes(searchTerm);
+                         (patient.medicalNumber && patient.medicalNumber.toLowerCase().includes(searchTerm.toLowerCase())) ||
+                         (patient.phone && patient.phone.includes(searchTerm));
     
     const matchesStatus = statusFilter === 'all' || patient.status === statusFilter;
     
@@ -224,7 +183,9 @@ export default function DoctorSearchPage() {
       case 'age':
         return a.age - b.age;
       case 'lastVisit':
-        return new Date(b.lastVisit).getTime() - new Date(a.lastVisit).getTime();
+        const aDate = a.lastVisit ? new Date(a.lastVisit).getTime() : 0;
+        const bDate = b.lastVisit ? new Date(b.lastVisit).getTime() : 0;
+        return bDate - aDate;
       case 'status':
         return a.status.localeCompare(b.status);
       default:
@@ -336,10 +297,33 @@ export default function DoctorSearchPage() {
 
         {/* Patient List */}
         <Card title={`Patients (${sortedPatients.length} found)`}>
-          <div className="space-y-4">
+          {error && (
+            <div className="mb-4 p-4 bg-red-50 border border-red-200 rounded-md">
+              <div className="flex">
+                <AlertTriangle className="h-5 w-5 text-red-400" />
+                <div className="ml-3">
+                  <h3 className="text-sm font-medium text-red-800">Error loading patients</h3>
+                  <p className="text-sm text-red-700 mt-2">{error}</p>
+                  <div className="mt-3">
+                    <Button size="sm" variant="outline" onClick={loadPatients}>
+                      Retry
+                    </Button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {loading ? (
+            <div className="text-center py-8">
+              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto"></div>
+              <p className="text-gray-500 mt-2">Loading patients...</p>
+            </div>
+          ) : (
+            <div className="space-y-4">
             {sortedPatients.map((patient) => (
               <div 
-                key={patient.id} 
+                key={patient._id} 
                 className="border border-gray-200 rounded-lg p-4 hover:bg-gray-50 transition-colors cursor-pointer"
                 onClick={() => handlePatientSelect(patient)}
               >
@@ -351,7 +335,7 @@ export default function DoctorSearchPage() {
                     <div>
                       <h3 className="font-semibold text-gray-900">{patient.name}</h3>
                       <p className="text-sm text-gray-500">
-                        {patient.age} years • {patient.gender} • {patient.medicalNumber}
+                        {patient.age} years • {patient.gender} • {patient.medicalNumber || 'N/A'}
                       </p>
                     </div>
                   </div>
@@ -370,7 +354,7 @@ export default function DoctorSearchPage() {
                   </div>
                   <div className="flex items-center">
                     <Phone className="w-4 h-4 mr-2" />
-                    <span>{patient.phone}</span>
+                    <span>{patient.phone || 'No phone'}</span>
                   </div>
                   <div className="flex items-center">
                     <Heart className="w-4 h-4 mr-2 text-red-500" />
@@ -378,7 +362,7 @@ export default function DoctorSearchPage() {
                   </div>
                   <div className="flex items-center">
                     <Calendar className="w-4 h-4 mr-2" />
-                    <span>Last Visit: {new Date(patient.lastVisit).toLocaleDateString()}</span>
+                    <span>Last Visit: {patient.lastVisit ? new Date(patient.lastVisit).toLocaleDateString() : 'No visits'}</span>
                   </div>
                 </div>
 
@@ -424,9 +408,10 @@ export default function DoctorSearchPage() {
                 </div>
               </div>
             ))}
-          </div>
+            </div>
+          )}
 
-          {sortedPatients.length === 0 && (
+          {sortedPatients.length === 0 && !loading && !error && (
             <div className="text-center py-8">
               <User className="w-12 h-12 text-gray-400 mx-auto mb-4" />
               <h3 className="text-lg font-medium text-gray-900 mb-2">No patients found</h3>

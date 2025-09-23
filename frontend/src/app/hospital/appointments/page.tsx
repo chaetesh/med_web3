@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import ProtectedRoute from '@/components/ProtectedRoute';
 import PageHeader from '@/components/PageHeader';
 import { Card, StatCard } from '@/components/Card';
@@ -32,7 +32,17 @@ import {
   Building,
   Download
 } from 'lucide-react';
+import { 
+  AppointmentApiService,
+  AppointmentStatus,
+  AppointmentType,
+  AppointmentResponse,
+  Appointment as ApiAppointment
+} from '@/lib/services/appointment.service';
+import { DoctorsApiService, Doctor as ApiDoctor } from '@/lib/services/doctors.service';
+import { ApiErrorClass } from '@/lib/services/auth.service';
 
+// Mapped interfaces for UI compatibility
 interface Doctor {
   id: string;
   name: string;
@@ -54,8 +64,8 @@ interface Appointment {
   date: string;
   time: string;
   duration: number;
-  status: 'scheduled' | 'completed' | 'cancelled' | 'no-show' | 'in-progress';
-  type: 'consultation' | 'follow-up' | 'emergency' | 'routine-checkup';
+  status: 'scheduled' | 'completed' | 'cancelled' | 'no-show' | 'in-progress' | 'confirmed';
+  type: 'consultation' | 'follow-up' | 'emergency' | 'routine-checkup' | 'in_person' | 'virtual';
   symptoms: string;
   consultationFee: number;
   urgencyLevel: 'low' | 'medium' | 'high' | 'critical';
@@ -73,145 +83,105 @@ export default function HospitalAppointmentsPage() {
   const [selectedAppointment, setSelectedAppointment] = useState<Appointment | null>(null);
   const [showAppointmentModal, setShowAppointmentModal] = useState(false);
 
-  // Mock data
-  const doctors: Doctor[] = [
-    { id: 'D001', name: 'Dr. Sarah Wilson', specialization: 'Cardiology', department: 'Cardiology', phone: '+1-555-0001', email: 'sarah.wilson@hospital.com' },
-    { id: 'D002', name: 'Dr. Michael Chen', specialization: 'Neurology', department: 'Neurology', phone: '+1-555-0002', email: 'michael.chen@hospital.com' },
-    { id: 'D003', name: 'Dr. Emily Rodriguez', specialization: 'Pediatrics', department: 'Pediatrics', phone: '+1-555-0003', email: 'emily.rodriguez@hospital.com' },
-    { id: 'D004', name: 'Dr. James Thompson', specialization: 'Oncology', department: 'Oncology', phone: '+1-555-0004', email: 'james.thompson@hospital.com' },
-    { id: 'D005', name: 'Dr. Lisa Wang', specialization: 'Orthopedics', department: 'Orthopedics', phone: '+1-555-0005', email: 'lisa.wang@hospital.com' },
-  ];
+  // API data states
+  const [doctors, setDoctors] = useState<Doctor[]>([]);
+  const [appointments, setAppointments] = useState<Appointment[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  const appointments: Appointment[] = [
-    {
-      id: 'A001',
-      doctorId: 'D001',
-      doctorName: 'Dr. Sarah Wilson',
-      doctorSpecialization: 'Cardiology',
-      patientId: 'P001',
-      patientName: 'Sarah Johnson',
-      patientAge: 39,
-      patientPhone: '+1-555-0123',
-      date: '2024-07-24',
-      time: '09:00',
-      duration: 30,
-      status: 'scheduled',
-      type: 'consultation',
-      symptoms: 'Chest pain, shortness of breath',
-      consultationFee: 200,
-      urgencyLevel: 'high',
-      appointmentMode: 'in-person',
-      department: 'Cardiology',
-      room: 'Room 301'
-    },
-    {
-      id: 'A002',
-      doctorId: 'D002',
-      doctorName: 'Dr. Michael Chen',
-      doctorSpecialization: 'Neurology',
-      patientId: 'P002',
-      patientName: 'Robert Martinez',
-      patientAge: 51,
-      patientPhone: '+1-555-0125',
-      date: '2024-07-24',
-      time: '10:30',
-      duration: 45,
-      status: 'in-progress',
-      type: 'follow-up',
-      symptoms: 'Migraine follow-up',
-      consultationFee: 250,
-      urgencyLevel: 'medium',
-      appointmentMode: 'in-person',
-      department: 'Neurology',
-      room: 'Room 205'
-    },
-    {
-      id: 'A003',
-      doctorId: 'D003',
-      doctorName: 'Dr. Emily Rodriguez',
-      doctorSpecialization: 'Pediatrics',
-      patientId: 'P003',
-      patientName: 'Emma Thompson',
-      patientAge: 8,
-      patientPhone: '+1-555-0127',
-      date: '2024-07-24',
-      time: '14:00',
-      duration: 30,
-      status: 'scheduled',
-      type: 'routine-checkup',
-      symptoms: 'Annual checkup',
-      consultationFee: 150,
-      urgencyLevel: 'low',
-      appointmentMode: 'in-person',
-      department: 'Pediatrics',
-      room: 'Room 102'
-    },
-    {
-      id: 'A004',
-      doctorId: 'D001',
-      doctorName: 'Dr. Sarah Wilson',
-      doctorSpecialization: 'Cardiology',
-      patientId: 'P004',
-      patientName: 'Michael Davis',
-      patientAge: 59,
-      patientPhone: '+1-555-0129',
-      date: '2024-07-24',
-      time: '15:30',
-      duration: 30,
-      status: 'completed',
-      type: 'consultation',
-      symptoms: 'Hypertension management',
-      consultationFee: 200,
-      urgencyLevel: 'medium',
-      appointmentMode: 'in-person',
-      department: 'Cardiology',
-      room: 'Room 301'
-    },
-    {
-      id: 'A005',
-      doctorId: 'D004',
-      doctorName: 'Dr. James Thompson',
-      doctorSpecialization: 'Oncology',
-      patientId: 'P005',
-      patientName: 'Lisa Anderson',
-      patientAge: 45,
-      patientPhone: '+1-555-0131',
-      date: '2024-07-25',
-      time: '09:30',
-      duration: 60,
-      status: 'scheduled',
-      type: 'consultation',
-      symptoms: 'Cancer screening follow-up',
-      consultationFee: 300,
-      urgencyLevel: 'high',
-      appointmentMode: 'in-person',
-      department: 'Oncology',
-      room: 'Room 401'
-    },
-    {
-      id: 'A006',
-      doctorId: 'D005',
-      doctorName: 'Dr. Lisa Wang',
-      doctorSpecialization: 'Orthopedics',
-      patientId: 'P006',
-      patientName: 'David Kim',
-      patientAge: 35,
-      patientPhone: '+1-555-0133',
-      date: '2024-07-23',
-      time: '11:00',
-      duration: 30,
-      status: 'no-show',
-      type: 'follow-up',
-      symptoms: 'Knee pain follow-up',
-      consultationFee: 180,
-      urgencyLevel: 'medium',
-      appointmentMode: 'in-person',
-      department: 'Orthopedics',
-      room: 'Room 203'
-    }
-  ];
+  // Fetch data on component mount
+  useEffect(() => {
+    const fetchHospitalData = async () => {
+      setLoading(true);
+      try {
+        // Fetch hospital appointments and doctors in parallel
+        const [appointmentsResponse, doctorsResponse] = await Promise.all([
+          AppointmentApiService.getHospitalAppointments({ page: 1, limit: 100 }),
+          DoctorsApiService.getDoctors({ page: 1, limit: 100 })
+        ]);
+
+        // Map API doctors to UI doctors
+        const mappedDoctors: Doctor[] = doctorsResponse.doctors.map(apiDoctor => ({
+          id: apiDoctor._id,
+          name: `${apiDoctor.firstName} ${apiDoctor.lastName}`,
+          specialization: apiDoctor.specialization,
+          department: apiDoctor.specialization, // Using specialization as department for now
+          phone: apiDoctor.phone || 'N/A',
+          email: apiDoctor.email
+        }));
+
+        // Map API appointments to UI appointments
+        const mappedAppointments: Appointment[] = appointmentsResponse.appointments.map(apiAppointment => ({
+          id: apiAppointment._id,
+          doctorId: apiAppointment.doctorId._id,
+          doctorName: `Dr. ${apiAppointment.doctorId.firstName} ${apiAppointment.doctorId.lastName}`,
+          doctorSpecialization: apiAppointment.doctorId.specialization || 'General',
+          patientId: apiAppointment.patientId._id,
+          patientName: `${apiAppointment.patientId.firstName} ${apiAppointment.patientId.lastName}`,
+          patientAge: 30, // This would need to be calculated from patient DOB
+          patientPhone: apiAppointment.patientId.phone || 'N/A',
+          date: new Date(apiAppointment.startTime).toISOString().split('T')[0],
+          time: new Date(apiAppointment.startTime).toTimeString().slice(0, 5),
+          duration: Math.round((new Date(apiAppointment.endTime).getTime() - new Date(apiAppointment.startTime).getTime()) / (1000 * 60)),
+          status: apiAppointment.status === AppointmentStatus.CONFIRMED ? 'confirmed' : apiAppointment.status as any,
+          type: apiAppointment.type === AppointmentType.IN_PERSON ? 'in_person' : 'virtual',
+          symptoms: apiAppointment.title,
+          consultationFee: 200, // This should come from doctor's profile
+          urgencyLevel: 'medium' as const, // This could be derived from appointment type
+          appointmentMode: apiAppointment.type === AppointmentType.IN_PERSON ? 'in-person' : 'video-call',
+          department: apiAppointment.doctorId.specialization || 'General',
+          room: undefined // This would come from appointment location data
+        }));
+
+        setDoctors(mappedDoctors);
+        setAppointments(mappedAppointments);
+        setError(null);
+      } catch (err) {
+        console.error('Error fetching hospital data:', err);
+        setError(err instanceof ApiErrorClass ? err.message : 'Failed to load data');
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchHospitalData();
+  }, []);
 
   const departments = ['all', 'Cardiology', 'Neurology', 'Pediatrics', 'Oncology', 'Orthopedics', 'Emergency'];
+
+  const handleAppointmentSelect = (appointment: Appointment) => {
+    setSelectedAppointment(appointment);
+    setShowAppointmentModal(true);
+  };
+
+  // Show loading state
+  if (loading && appointments.length === 0) {
+    return (
+      <ProtectedRoute allowedRoles={['hospital_admin']}>
+        <div className="flex items-center justify-center min-h-[400px]">
+          <div className="text-center">
+            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto mb-4"></div>
+            <p className="text-gray-500">Loading hospital data...</p>
+          </div>
+        </div>
+      </ProtectedRoute>
+    );
+  }
+
+  // Show error state
+  if (error && appointments.length === 0) {
+    return (
+      <ProtectedRoute allowedRoles={['hospital_admin']}>
+        <div className="flex items-center justify-center min-h-[400px]">
+          <div className="text-center">
+            <AlertCircle className="w-8 h-8 text-red-600 mx-auto mb-4" />
+            <p className="text-red-600 mb-4">{error}</p>
+            <Button onClick={() => window.location.reload()}>Try Again</Button>
+          </div>
+        </div>
+      </ProtectedRoute>
+    );
+  }
 
   const getStatusColor = (status: string) => {
     switch (status) {
@@ -293,14 +263,21 @@ export default function HospitalAppointmentsPage() {
     };
   });
 
-  const handleAppointmentSelect = (appointment: Appointment) => {
-    setSelectedAppointment(appointment);
-    setShowAppointmentModal(true);
-  };
-
   return (
     <ProtectedRoute allowedRoles={['hospital_admin']}>
       <div className="space-y-6">
+        {error && (
+          <div className="bg-red-50 border border-red-200 rounded-md p-4">
+            <div className="flex">
+              <AlertCircle className="h-5 w-5 text-red-400" />
+              <div className="ml-3">
+                <h3 className="text-sm font-medium text-red-800">Error</h3>
+                <p className="mt-2 text-sm text-red-700">{error}</p>
+              </div>
+            </div>
+          </div>
+        )}
+        
         <PageHeader
           title="Hospital Appointments"
           description="Monitor and manage all doctor appointments across departments"

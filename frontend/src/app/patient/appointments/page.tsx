@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import ProtectedRoute from '@/components/ProtectedRoute';
 import PageHeader from '@/components/PageHeader';
 import { Card, StatCard } from '@/components/Card';
@@ -26,7 +26,20 @@ import {
   CreditCard,
   FileText
 } from 'lucide-react';
+import { 
+  AppointmentApiService,
+  AppointmentStatus,
+  AppointmentType,
+  CreateAppointmentDto,
+  Appointment as ApiAppointment,
+  AppointmentResponse,
+  DoctorAvailability
+} from '@/lib/services/appointment.service';
+import { DoctorsApiService, Doctor as ApiDoctor } from '@/lib/services/doctors.service';
+import { HospitalsApiService, Hospital as ApiHospital } from '@/lib/services/hospitals.service';
+import { ApiErrorClass } from '@/lib/services/auth.service';
 
+// Mapped types for UI compatibility
 interface Doctor {
   id: string;
   name: string;
@@ -65,8 +78,8 @@ interface Appointment {
   hospitalName: string;
   date: string;
   time: string;
-  status: 'scheduled' | 'completed' | 'cancelled' | 'pending';
-  type: 'consultation' | 'follow-up' | 'emergency';
+  status: 'scheduled' | 'completed' | 'cancelled' | 'pending' | 'confirmed';
+  type: 'consultation' | 'follow-up' | 'emergency' | 'in_person' | 'virtual';
   symptoms?: string;
   notes?: string;
   fee: number;
@@ -81,181 +94,151 @@ export default function PatientAppointmentPage() {
   const [showBookingModal, setShowBookingModal] = useState(false);
   const [selectedDate, setSelectedDate] = useState('');
   const [selectedTime, setSelectedTime] = useState('');
-  const [appointmentType, setAppointmentType] = useState('consultation');
+  const [appointmentType, setAppointmentType] = useState('in_person');
   const [symptoms, setSymptoms] = useState('');
   const [notes, setNotes] = useState('');
+  
+  // API data states
+  const [doctors, setDoctors] = useState<Doctor[]>([]);
+  const [hospitals, setHospitals] = useState<Hospital[]>([]);
+  const [appointments, setAppointments] = useState<Appointment[]>([]);
+  const [doctorAvailability, setDoctorAvailability] = useState<DoctorAvailability | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  // Mock data - replace with actual API calls
-  const hospitals: Hospital[] = [
-    {
-      id: 'H001',
-      name: 'City General Hospital',
-      address: '123 Medical Center Drive, City, State 12345',
-      phone: '+1-555-0100',
-      email: 'info@citygeneral.com',
-      rating: 4.8,
-      specialties: ['Cardiology', 'Neurology', 'Orthopedics', 'Internal Medicine'],
-      facilities: ['Emergency Room', 'ICU', 'Surgical Center', 'Diagnostic Imaging']
-    },
-    {
-      id: 'H002',
-      name: 'Metropolitan Medical Center',
-      address: '456 Healthcare Boulevard, City, State 12345',
-      phone: '+1-555-0200',
-      email: 'contact@metmedical.com',
-      rating: 4.6,
-      specialties: ['Pediatrics', 'Gynecology', 'Dermatology', 'Psychiatry'],
-      facilities: ['Maternity Ward', 'Pediatric ICU', 'Outpatient Clinic', 'Laboratory']
-    },
-    {
-      id: 'H003',
-      name: 'Advanced Care Institute',
-      address: '789 Wellness Way, City, State 12345',
-      phone: '+1-555-0300',
-      email: 'appointments@advancedcare.com',
-      rating: 4.9,
-      specialties: ['Oncology', 'Radiology', 'Cardiology', 'Gastroenterology'],
-      facilities: ['Cancer Center', 'Advanced Imaging', 'Heart Center', 'Research Lab']
-    }
-  ];
+  // Fetch data on component mount
+  useEffect(() => {
+    const fetchInitialData = async () => {
+      setLoading(true);
+      try {
+        // Fetch doctors, hospitals, and appointments in parallel
+        const [doctorsResponse, hospitalsResponse, appointmentsResponse] = await Promise.all([
+          DoctorsApiService.getDoctors({ page: 1, limit: 50 }),
+          HospitalsApiService.getHospitals({ page: 1, limit: 50 }),
+          AppointmentApiService.getPatientAppointments({ page: 1, limit: 50 })
+        ]);
 
-  const doctors: Doctor[] = [
-    {
-      id: 'D001',
-      name: 'Dr. Sarah Wilson',
-      specialization: 'Cardiology',
-      hospital: 'City General Hospital',
-      hospitalId: 'H001',
-      rating: 4.9,
-      experience: 15,
-      consultationFee: 200,
-      availableSlots: [
-        {
-          date: '2024-07-25',
-          times: ['09:00', '10:30', '14:00', '15:30']
-        },
-        {
-          date: '2024-07-26',
-          times: ['09:00', '11:00', '13:30', '16:00']
-        }
-      ],
-      nextAvailableDate: '2024-07-25',
-      qualifications: ['MD Cardiology', 'FACC', 'FSCAI'],
-      languages: ['English', 'Spanish'],
-      about: 'Dr. Wilson is a board-certified cardiologist with over 15 years of experience treating heart conditions. She specializes in interventional cardiology and preventive heart care.'
-    },
-    {
-      id: 'D002',
-      name: 'Dr. Michael Chen',
-      specialization: 'Neurology',
-      hospital: 'City General Hospital',
-      hospitalId: 'H001',
-      rating: 4.8,
-      experience: 12,
-      consultationFee: 250,
-      availableSlots: [
-        {
-          date: '2024-07-25',
-          times: ['10:00', '13:00', '15:00']
-        },
-        {
-          date: '2024-07-27',
-          times: ['09:30', '12:00', '14:30']
-        }
-      ],
-      nextAvailableDate: '2024-07-25',
-      qualifications: ['MD Neurology', 'Fellowship in Movement Disorders'],
-      languages: ['English', 'Mandarin'],
-      about: 'Dr. Chen specializes in neurological disorders with a focus on movement disorders, epilepsy, and stroke care. He has published extensively in peer-reviewed journals.'
-    },
-    {
-      id: 'D003',
-      name: 'Dr. Emily Rodriguez',
-      specialization: 'Pediatrics',
-      hospital: 'Metropolitan Medical Center',
-      hospitalId: 'H002',
-      rating: 4.7,
-      experience: 10,
-      consultationFee: 150,
-      availableSlots: [
-        {
-          date: '2024-07-24',
-          times: ['08:00', '09:30', '11:00', '14:00', '16:30']
-        },
-        {
-          date: '2024-07-25',
-          times: ['08:30', '10:00', '13:30', '15:00']
-        }
-      ],
-      nextAvailableDate: '2024-07-24',
-      qualifications: ['MD Pediatrics', 'Board Certified'],
-      languages: ['English', 'Spanish'],
-      about: 'Dr. Rodriguez is passionate about providing comprehensive care for children from infancy through adolescence. She has a special interest in developmental pediatrics.'
-    },
-    {
-      id: 'D004',
-      name: 'Dr. James Thompson',
-      specialization: 'Oncology',
-      hospital: 'Advanced Care Institute',
-      hospitalId: 'H003',
-      rating: 4.9,
-      experience: 20,
-      consultationFee: 300,
-      availableSlots: [
-        {
-          date: '2024-07-26',
-          times: ['09:00', '11:30', '14:00']
-        },
-        {
-          date: '2024-07-29',
-          times: ['10:00', '13:00', '15:30']
-        }
-      ],
-      nextAvailableDate: '2024-07-26',
-      qualifications: ['MD Oncology', 'Fellowship in Hematology-Oncology', 'Research Director'],
-      languages: ['English'],
-      about: 'Dr. Thompson is a leading oncologist with 20 years of experience in cancer treatment and research. He specializes in personalized cancer therapy and clinical trials.'
-    }
-  ];
+        // Map API doctors to UI doctors
+        const mappedDoctors: Doctor[] = doctorsResponse.doctors.map(apiDoctor => ({
+          id: apiDoctor._id,
+          name: `${apiDoctor.firstName} ${apiDoctor.lastName}`,
+          specialization: apiDoctor.specialization,
+          hospital: apiDoctor.hospital?.name || 'Unknown Hospital',
+          hospitalId: apiDoctor.hospital?._id || apiDoctor.hospitalId || '',
+          rating: apiDoctor.rating || 4.5,
+          experience: apiDoctor.yearsOfExperience || 0,
+          consultationFee: apiDoctor.consultationFee || 200,
+          avatar: apiDoctor.avatar,
+          availableSlots: [], // Will be populated when needed
+          nextAvailableDate: new Date().toISOString().split('T')[0],
+          qualifications: apiDoctor.qualifications || [],
+          languages: apiDoctor.languages || ['English'],
+          about: apiDoctor.about || 'Experienced medical professional'
+        }));
 
-  const myAppointments: Appointment[] = [
-    {
-      id: 'A001',
-      doctorId: 'D001',
-      doctorName: 'Dr. Sarah Wilson',
-      hospitalName: 'City General Hospital',
-      date: '2024-07-25',
-      time: '10:30',
-      status: 'scheduled',
-      type: 'consultation',
-      symptoms: 'Chest pain, shortness of breath',
-      fee: 200
-    },
-    {
-      id: 'A002',
-      doctorId: 'D003',
-      doctorName: 'Dr. Emily Rodriguez',
-      hospitalName: 'Metropolitan Medical Center',
-      date: '2024-07-20',
-      time: '14:00',
-      status: 'completed',
-      type: 'follow-up',
-      notes: 'Regular checkup for child',
-      fee: 150
-    },
-    {
-      id: 'A003',
-      doctorId: 'D002',
-      doctorName: 'Dr. Michael Chen',
-      hospitalName: 'City General Hospital',
-      date: '2024-07-15',
-      time: '15:00',
-      status: 'cancelled',
-      type: 'consultation',
-      symptoms: 'Headaches, dizziness',
-      fee: 250
+        // Map API hospitals to UI hospitals
+        const mappedHospitals: Hospital[] = hospitalsResponse.hospitals.map(apiHospital => ({
+          id: apiHospital._id,
+          name: apiHospital.name,
+          address: apiHospital.address,
+          phone: apiHospital.phone,
+          email: apiHospital.email,
+          rating: apiHospital.rating || 4.5,
+          specialties: apiHospital.specialties,
+          facilities: apiHospital.facilities
+        }));
+
+        // Map API appointments to UI appointments
+        const mappedAppointments: Appointment[] = appointmentsResponse.appointments.map(apiAppointment => ({
+          id: apiAppointment._id,
+          doctorId: apiAppointment.doctorId._id,
+          doctorName: `Dr. ${apiAppointment.doctorId.firstName} ${apiAppointment.doctorId.lastName}`,
+          hospitalName: 'Hospital Name', // You might need to fetch this separately
+          date: new Date(apiAppointment.startTime).toISOString().split('T')[0],
+          time: new Date(apiAppointment.startTime).toTimeString().slice(0, 5),
+          status: apiAppointment.status as any,
+          type: apiAppointment.type === AppointmentType.IN_PERSON ? 'in_person' : 'virtual',
+          symptoms: apiAppointment.title,
+          notes: apiAppointment.notes,
+          fee: 200 // This should come from doctor's consultation fee
+        }));
+
+        setDoctors(mappedDoctors);
+        setHospitals(mappedHospitals);
+        setAppointments(mappedAppointments);
+      } catch (err) {
+        console.error('Error fetching data:', err);
+        setError(err instanceof ApiErrorClass ? err.message : 'Failed to load data');
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchInitialData();
+  }, []);
+
+  // Fetch doctor availability when a doctor is selected
+  const fetchDoctorAvailability = async (doctorId: string) => {
+    try {
+      setLoading(true);
+      const startDate = new Date();
+      const endDate = new Date();
+      endDate.setDate(endDate.getDate() + 14); // Next 2 weeks
+
+      // Try to fetch availability from API, but fallback to mock data if it fails
+      try {
+        const availability = await AppointmentApiService.getDoctorAvailability(doctorId, {
+          startDate: startDate.toISOString().split('T')[0],
+          endDate: endDate.toISOString().split('T')[0]
+        });
+
+        setDoctorAvailability(availability);
+
+        // Update the selected doctor's available slots
+        if (selectedDoctor && selectedDoctor.id === doctorId) {
+          const updatedDoctor = {
+            ...selectedDoctor,
+            availableSlots: availability.availableSlots.map(slot => ({
+              date: slot.date,
+              times: slot.slots.map(s => s.startTime)
+            }))
+          };
+          setSelectedDoctor(updatedDoctor);
+        }
+      } catch (apiError) {
+        console.warn('API availability failed, using mock data:', apiError);
+        
+        // Generate mock availability for next 7 days
+        const mockSlots = [];
+        for (let i = 1; i <= 7; i++) {
+          const date = new Date();
+          date.setDate(date.getDate() + i);
+          
+          // Skip weekends for demo
+          if (date.getDay() !== 0 && date.getDay() !== 6) {
+            mockSlots.push({
+              date: date.toISOString().split('T')[0],
+              times: ['09:00', '10:00', '11:00', '14:00', '15:00', '16:00']
+            });
+          }
+        }
+
+        // Update the selected doctor with mock slots
+        if (selectedDoctor && selectedDoctor.id === doctorId) {
+          const updatedDoctor = {
+            ...selectedDoctor,
+            availableSlots: mockSlots
+          };
+          setSelectedDoctor(updatedDoctor);
+        }
+      }
+    } catch (err) {
+      console.error('Error in fetchDoctorAvailability:', err);
+      setError(err instanceof ApiErrorClass ? err.message : 'Failed to load availability');
+    } finally {
+      setLoading(false);
     }
-  ];
+  };
 
   const specialties = ['all', 'Cardiology', 'Neurology', 'Pediatrics', 'Oncology', 'Orthopedics', 'Dermatology', 'Psychiatry', 'Gynecology', 'Internal Medicine'];
 
@@ -307,31 +290,133 @@ export default function PatientAppointmentPage() {
     setSelectedTime('');
     setSymptoms('');
     setNotes('');
+    // Fetch availability when doctor is selected
+    fetchDoctorAvailability(doctor.id);
   };
 
-  const handleConfirmBooking = () => {
-    // Here you would typically make an API call to book the appointment
-    console.log('Booking appointment:', {
-      doctorId: selectedDoctor?.id,
-      date: selectedDate,
-      time: selectedTime,
-      type: appointmentType,
-      symptoms,
-      notes
-    });
-    
-    setShowBookingModal(false);
-    setSelectedDoctor(null);
-    // Show success message or redirect
-    alert('Appointment booked successfully!');
+  const handleConfirmBooking = async () => {
+    if (!selectedDoctor || !selectedDate || !selectedTime) {
+      setError('Please fill in all required fields');
+      return;
+    }
+
+    try {
+      setLoading(true);
+      
+      // Create the appointment date
+      const [hours, minutes] = selectedTime.split(':').map(Number);
+      const appointmentDate = new Date(selectedDate);
+      appointmentDate.setHours(hours, minutes, 0, 0);
+
+      // Create the appointment data object
+      const appointmentData: any = {
+        doctorId: selectedDoctor.id,
+        date: appointmentDate,
+        duration: 30, // Default 30 minutes
+        type: appointmentType as AppointmentType,
+        reason: symptoms,
+        notes: notes
+      };
+
+      // Only include hospitalId if it's a valid non-empty string
+      if (selectedDoctor.hospitalId && selectedDoctor.hospitalId.trim() && selectedDoctor.hospitalId !== '') {
+        appointmentData.hospitalId = selectedDoctor.hospitalId;
+      }
+
+      await AppointmentApiService.createAppointment(appointmentData);
+      
+      // Refresh appointments list
+      const appointmentsResponse = await AppointmentApiService.getPatientAppointments({ page: 1, limit: 50 });
+      const mappedAppointments: Appointment[] = appointmentsResponse.appointments.map(apiAppointment => ({
+        id: apiAppointment._id,
+        doctorId: apiAppointment.doctorId._id,
+        doctorName: `Dr. ${apiAppointment.doctorId.firstName} ${apiAppointment.doctorId.lastName}`,
+        hospitalName: 'Hospital Name',
+        date: new Date(apiAppointment.startTime).toISOString().split('T')[0],
+        time: new Date(apiAppointment.startTime).toTimeString().slice(0, 5),
+        status: apiAppointment.status as any,
+        type: apiAppointment.type === AppointmentType.IN_PERSON ? 'in_person' : 'virtual',
+        symptoms: apiAppointment.title,
+        notes: apiAppointment.notes,
+        fee: selectedDoctor.consultationFee
+      }));
+      setAppointments(mappedAppointments);
+      
+      setShowBookingModal(false);
+      setSelectedDoctor(null);
+      setError(null);
+      
+      // Show success message (you might want to use a toast notification)
+      alert('Appointment booked successfully!');
+    } catch (err) {
+      console.error('Error booking appointment:', err);
+      setError(err instanceof ApiErrorClass ? err.message : 'Failed to book appointment');
+    } finally {
+      setLoading(false);
+    }
   };
 
-  const totalAppointments = myAppointments.length;
-  const scheduledAppointments = myAppointments.filter(a => a.status === 'scheduled').length;
-  const completedAppointments = myAppointments.filter(a => a.status === 'completed').length;
-  const upcomingToday = myAppointments.filter(a => 
+  const totalAppointments = appointments.length;
+  const scheduledAppointments = appointments.filter((a: Appointment) => a.status === 'scheduled').length;
+  const completedAppointments = appointments.filter((a: Appointment) => a.status === 'completed').length;
+  const upcomingToday = appointments.filter((a: Appointment) => 
     a.status === 'scheduled' && new Date(a.date).toDateString() === new Date().toDateString()
   ).length;
+
+  // Handle appointment cancellation
+  const handleCancelAppointment = async (appointmentId: string) => {
+    if (!confirm('Are you sure you want to cancel this appointment?')) {
+      return;
+    }
+
+    try {
+      setLoading(true);
+      await AppointmentApiService.cancelAppointment(appointmentId, 'Cancelled by patient');
+      
+      // Update local state
+      setAppointments(prev => prev.map(apt => 
+        apt.id === appointmentId 
+          ? { ...apt, status: 'cancelled' as const }
+          : apt
+      ));
+      
+      setError(null);
+    } catch (err) {
+      console.error('Error cancelling appointment:', err);
+      setError(err instanceof ApiErrorClass ? err.message : 'Failed to cancel appointment');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Show loading state
+  if (loading && appointments.length === 0) {
+    return (
+      <ProtectedRoute allowedRoles={['patient']}>
+        <div className="flex items-center justify-center min-h-[400px]">
+          <div className="text-center">
+            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto mb-4"></div>
+            <p className="text-gray-500">Loading appointments...</p>
+          </div>
+        </div>
+      </ProtectedRoute>
+    );
+  }
+
+  // Show error state
+  if (error && appointments.length === 0) {
+    return (
+      <ProtectedRoute allowedRoles={['patient']}>
+        <div className="flex items-center justify-center min-h-[400px]">
+          <div className="text-center">
+            <AlertCircle className="w-8 h-8 text-red-600 mx-auto mb-4" />
+            <p className="text-red-600 mb-4">{error}</p>
+            <Button onClick={() => window.location.reload()}>Try Again</Button>
+          </div>
+        </div>
+      </ProtectedRoute>
+    );
+  }
 
   return (
     <ProtectedRoute allowedRoles={['patient']}>
@@ -528,7 +613,7 @@ export default function PatientAppointmentPage() {
           <div className="space-y-6">
             <Card title="My Appointments">
               <div className="space-y-4">
-                {myAppointments.map((appointment) => (
+                {appointments.map((appointment: Appointment) => (
                   <div key={appointment.id} className="border border-gray-200 rounded-lg p-4">
                     <div className="flex items-start justify-between mb-3">
                       <div className="flex items-start space-x-3">
@@ -600,7 +685,7 @@ export default function PatientAppointmentPage() {
                 ))}
               </div>
 
-              {myAppointments.length === 0 && (
+              {appointments.length === 0 && (
                 <div className="text-center py-8">
                   <Calendar className="w-12 h-12 text-gray-400 mx-auto mb-4" />
                   <h3 className="text-lg font-medium text-gray-900 mb-2">No appointments</h3>
@@ -646,9 +731,8 @@ export default function PatientAppointmentPage() {
                       onChange={(e) => setAppointmentType(e.target.value)}
                       className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                     >
-                      <option value="consultation">Consultation</option>
-                      <option value="follow-up">Follow-up</option>
-                      <option value="emergency">Emergency</option>
+                      <option value="in_person">In-Person Consultation</option>
+                      <option value="virtual">Virtual Consultation</option>
                     </select>
                   </div>
 
@@ -657,42 +741,72 @@ export default function PatientAppointmentPage() {
                     <label className="block text-sm font-medium text-gray-700 mb-2">
                       Select Date
                     </label>
-                    <select
-                      value={selectedDate}
-                      onChange={(e) => setSelectedDate(e.target.value)}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                    >
-                      <option value="">Choose a date</option>
-                      {selectedDoctor.availableSlots.map((slot) => (
-                        <option key={slot.date} value={slot.date}>
-                          {new Date(slot.date).toLocaleDateString()}
-                        </option>
-                      ))}
-                    </select>
+                    {selectedDoctor.availableSlots.length === 0 ? (
+                      <div className="w-full px-3 py-2 border border-gray-300 rounded-lg bg-gray-50">
+                        <div className="flex items-center justify-center text-sm text-gray-500">
+                          {loading ? (
+                            <>
+                              <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600 mr-2"></div>
+                              Loading available dates...
+                            </>
+                          ) : (
+                            'Loading availability...'
+                          )}
+                        </div>
+                      </div>
+                    ) : (
+                      <select
+                        value={selectedDate}
+                        onChange={(e) => {
+                          setSelectedDate(e.target.value);
+                          setSelectedTime(''); // Clear selected time when date changes
+                        }}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                      >
+                        <option value="">Choose a date ({selectedDoctor.availableSlots.length} available)</option>
+                        {selectedDoctor.availableSlots.map((slot) => (
+                          <option key={slot.date} value={slot.date}>
+                            {new Date(slot.date).toLocaleDateString('en-US', { 
+                              weekday: 'long', 
+                              year: 'numeric', 
+                              month: 'long', 
+                              day: 'numeric' 
+                            })}
+                          </option>
+                        ))}
+                      </select>
+                    )}
                   </div>
 
                   {/* Time Selection */}
                   {selectedDate && (
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-2">
-                        Select Time
+                        Available Times ({selectedDoctor.availableSlots
+                          .find(slot => slot.date === selectedDate)
+                          ?.times.length || 0} slots)
                       </label>
-                      <div className="grid grid-cols-2 gap-2">
+                      <div className="grid grid-cols-3 gap-2">
                         {selectedDoctor.availableSlots
                           .find(slot => slot.date === selectedDate)
                           ?.times.map((time) => (
                             <button
                               key={time}
+                              type="button"
                               onClick={() => setSelectedTime(time)}
-                              className={`px-3 py-2 border rounded-lg text-sm ${
+                              className={`px-3 py-2 border rounded-lg text-sm transition-colors ${
                                 selectedTime === time
-                                  ? 'border-blue-500 bg-blue-50 text-blue-700'
-                                  : 'border-gray-300 hover:border-gray-400'
+                                  ? 'border-blue-500 bg-blue-50 text-blue-700 font-medium'
+                                  : 'border-gray-300 hover:border-blue-300 hover:bg-blue-50'
                               }`}
                             >
                               {time}
                             </button>
-                          ))}
+                          )) || (
+                          <div className="col-span-3 text-sm text-gray-500 text-center py-2">
+                            No available times for this date
+                          </div>
+                        )}
                       </div>
                     </div>
                   )}

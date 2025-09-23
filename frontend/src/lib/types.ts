@@ -91,6 +91,22 @@ export interface AccessLog {
   timestamp: string;
 }
 
+export interface AuditLog {
+  id: string;
+  timestamp: string;
+  userId: string;
+  userName: string;
+  userRole: 'patient' | 'doctor' | 'hospital_admin' | 'system_admin';
+  action: 'view' | 'upload' | 'share' | 'download' | 'delete' | 'modify';
+  resourceType: 'patient_record' | 'user_account' | 'hospital_data' | 'system_config';
+  resourceId: string;
+  resourceName: string;
+  ipAddress: string;
+  location: string;
+  success: boolean;
+  details?: string;
+}
+
 export interface AIConfiguration {
   id: string;
   hospitalId?: string;
