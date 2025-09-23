@@ -3,6 +3,7 @@ import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcrypt';
 import { UsersService } from '../users/users.service';
 import { User } from '../users/schemas/user.schema';
+import { EnsService } from '../../common/ens.service';
 
 @Injectable()
 export class AuthService {
@@ -11,6 +12,7 @@ export class AuthService {
   constructor(
     private readonly usersService: UsersService,
     private readonly jwtService: JwtService,
+    private readonly ensService: EnsService,
   ) {}
 
   async validateUser(email: string, password: string): Promise<any> {
@@ -52,23 +54,68 @@ export class AuthService {
       hospitalId: user.hospitalId,
     };
 
+    // Resolve ENS name if user has a wallet address
+    let ensData: any = null;
+    if (user.walletAddress) {
+      try {
+        const ensMetadata = await this.ensService.getEnsMetadata(user.walletAddress);
+        ensData = this.ensService.formatAddressWithEns(user.walletAddress, ensMetadata.name, ensMetadata.network);
+        
+        // Add ENS metadata if available
+        if (ensMetadata.name) {
+          ensData.metadata = {
+            avatar: ensMetadata.avatar,
+            description: ensMetadata.description,
+            url: ensMetadata.url,
+            social: {
+              twitter: ensMetadata.twitter,
+              github: ensMetadata.github,
+            }
+          };
+        }
+      } catch (error) {
+        this.logger.warn(`Failed to resolve ENS for ${user.walletAddress}: ${error.message}`);
+        ensData = this.ensService.formatAddressWithEns(user.walletAddress, null, null);
+      }
+    }
+
+    // Return user data with ENS information
+    const userData = {
+      ...user.toObject?.() || user,
+      wallet: ensData,
+    };
+
+    // Remove password from response
+    delete userData.password;
+
     return {
-      user,
+      user: userData,
       access_token: this.jwtService.sign(payload),
     };
   }
 
   async validateWalletSignature(
-    address: string,
+    addressOrEns: string,
     signature: string,
     message: string,
   ): Promise<any> {
     try {
       // Verify wallet signature logic will go here
       // This would typically use ethers.js to recover the address from the signature
-      // For now, we'll just find the user by wallet address
+      
+      let walletAddress = addressOrEns;
+      
+      // Check if the input is an ENS name and resolve it
+      if (this.ensService.isValidEnsName(addressOrEns)) {
+        const resolvedAddress = await this.ensService.resolveEnsToAddress(addressOrEns);
+        if (!resolvedAddress) {
+          throw new UnauthorizedException(`ENS name ${addressOrEns} could not be resolved`);
+        }
+        walletAddress = resolvedAddress;
+        this.logger.log(`Resolved ENS ${addressOrEns} to address ${walletAddress}`);
+      }
 
-      const user = await this.usersService.findByWalletAddress(address);
+      const user = await this.usersService.findByWalletAddress(walletAddress);
 
       if (!user) {
         throw new UnauthorizedException('Wallet address not found');
@@ -146,13 +193,25 @@ export class AuthService {
   }
 
   async registerWithWallet(
-    address: string,
+    addressOrEns: string,
     firstName: string,
     lastName: string,
     email: string,
     role: string,
   ): Promise<User> {
     try {
+      let walletAddress = addressOrEns;
+      
+      // Check if the input is an ENS name and resolve it
+      if (this.ensService.isValidEnsName(addressOrEns)) {
+        const resolvedAddress = await this.ensService.resolveEnsToAddress(addressOrEns);
+        if (!resolvedAddress) {
+          throw new Error(`ENS name ${addressOrEns} could not be resolved`);
+        }
+        walletAddress = resolvedAddress;
+        this.logger.log(`Resolved ENS ${addressOrEns} to address ${walletAddress} for registration`);
+      }
+
       // Generate a secure random password
       const randomPassword =
         Math.random().toString(36).slice(2) +
@@ -168,7 +227,7 @@ export class AuthService {
         firstName,
         lastName,
         role: role as any, // Type cast to fix the type error
-        walletAddress: address,
+        walletAddress: walletAddress,
       });
 
       return user;
@@ -181,8 +240,20 @@ export class AuthService {
     }
   }
 
-  async linkWalletToUser(userId: string, walletAddress: string): Promise<User> {
+  async linkWalletToUser(userId: string, walletAddressOrEns: string): Promise<User> {
     try {
+      let walletAddress = walletAddressOrEns;
+      
+      // Check if the input is an ENS name and resolve it
+      if (this.ensService.isValidEnsName(walletAddressOrEns)) {
+        const resolvedAddress = await this.ensService.resolveEnsToAddress(walletAddressOrEns);
+        if (!resolvedAddress) {
+          throw new Error(`ENS name ${walletAddressOrEns} could not be resolved`);
+        }
+        walletAddress = resolvedAddress;
+        this.logger.log(`Resolved ENS ${walletAddressOrEns} to address ${walletAddress} for linking`);
+      }
+
       const user = await this.usersService.updateWalletAddress(
         userId,
         walletAddress,

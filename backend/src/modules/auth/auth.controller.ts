@@ -8,12 +8,14 @@ import {
   HttpCode,
   BadRequestException,
   ValidationPipe,
+  Query,
 } from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
 import { AuthService } from './auth.service';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
 import { LocalAuthGuard } from './guards/local-auth.guard';
 import { UserRole } from '../users/schemas/user.schema';
+import { EnsService } from '../../common/ens.service';
 import {
   IsEmail,
   IsString,
@@ -75,11 +77,8 @@ class LoginDto {
 }
 
 class WalletLoginDto {
-  @IsString({ message: 'Wallet address must be a string' })
-  @IsNotEmpty({ message: 'Wallet address is required' })
-  @Matches(/^0x[a-fA-F0-9]{40}$/, {
-    message: 'Invalid Ethereum address format',
-  })
+  @IsString({ message: 'Wallet address or ENS name must be a string' })
+  @IsNotEmpty({ message: 'Wallet address or ENS name is required' })
   address: string;
 
   @IsString({ message: 'Signature must be a string' })
@@ -92,11 +91,8 @@ class WalletLoginDto {
 }
 
 class WalletRegisterDto {
-  @IsString({ message: 'Wallet address must be a string' })
-  @IsNotEmpty({ message: 'Wallet address is required' })
-  @Matches(/^0x[a-fA-F0-9]{40}$/, {
-    message: 'Invalid Ethereum address format',
-  })
+  @IsString({ message: 'Wallet address or ENS name must be a string' })
+  @IsNotEmpty({ message: 'Wallet address or ENS name is required' })
   address: string;
 
   @IsString({ message: 'First name must be a string' })
@@ -117,17 +113,17 @@ class WalletRegisterDto {
 }
 
 class LinkWalletDto {
-  @IsString({ message: 'Wallet address must be a string' })
-  @IsNotEmpty({ message: 'Wallet address is required' })
-  @Matches(/^0x[a-fA-F0-9]{40}$/, {
-    message: 'Invalid Ethereum address format',
-  })
+  @IsString({ message: 'Wallet address or ENS name must be a string' })
+  @IsNotEmpty({ message: 'Wallet address or ENS name is required' })
   walletAddress: string;
 }
 
 @Controller('auth')
 export class AuthController {
-  constructor(private readonly authService: AuthService) {}
+  constructor(
+    private readonly authService: AuthService,
+    private readonly ensService: EnsService,
+  ) {}
 
   @Post('register')
   async register(@Body(new ValidationPipe()) registerDto: RegisterDto) {
@@ -226,5 +222,118 @@ export class AuthController {
   @Post('refresh')
   async refreshToken(@Request() req) {
     return this.authService.refreshToken(req.user.id);
+  }
+
+  @Get('ens/resolve')
+  async resolveEns(
+    @Query('name') ensName: string, 
+    @Query('address') address: string,
+    @Query('network') network?: 'mainnet' | 'sepolia'
+  ) {
+    try {
+      if (ensName && !address) {
+        // Resolve ENS name to address
+        if (!this.ensService.isValidEnsName(ensName)) {
+          throw new BadRequestException('Invalid ENS name format');
+        }
+
+        const resolvedAddress = await this.ensService.resolveEnsToAddress(ensName, network);
+        if (!resolvedAddress) {
+          return {
+            ensName,
+            address: null,
+            resolved: false,
+            network: network || 'both',
+            message: 'ENS name could not be resolved',
+          };
+        }
+
+        const metadata = await this.ensService.getEnsMetadata(resolvedAddress, network);
+        return {
+          ensName,
+          address: resolvedAddress,
+          resolved: true,
+          network: metadata.network || network || 'mainnet',
+          metadata,
+        };
+      } else if (address && !ensName) {
+        // Reverse resolve address to ENS name
+        if (!address.match(/^0x[a-fA-F0-9]{40}$/)) {
+          throw new BadRequestException('Invalid Ethereum address format');
+        }
+
+        const metadata = await this.ensService.getEnsMetadata(address, network);
+        const formatted = this.ensService.formatAddressWithEns(address, metadata.name, metadata.network);
+
+        return {
+          address,
+          ensName: metadata.name,
+          resolved: !!metadata.name,
+          displayName: formatted.displayName,
+          network: metadata.network || network || 'both',
+          metadata,
+        };
+      } else {
+        throw new BadRequestException('Please provide either "name" or "address" parameter, not both');
+      }
+    } catch (error) {
+      throw new BadRequestException(error.message);
+    }
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Get('wallet/ens')
+  async getWalletEns(@Request() req) {
+    try {
+      const user = req.user;
+      
+      if (!user.walletAddress) {
+        return {
+          hasWallet: false,
+          message: 'No wallet linked to this account',
+        };
+      }
+
+      const metadata = await this.ensService.getEnsMetadata(user.walletAddress);
+      const formatted = this.ensService.formatAddressWithEns(user.walletAddress, metadata.name, metadata.network);
+
+      return {
+        hasWallet: true,
+        wallet: {
+          ...formatted,
+          metadata: metadata.name ? {
+            avatar: metadata.avatar,
+            description: metadata.description,
+            url: metadata.url,
+            social: {
+              twitter: metadata.twitter,
+              github: metadata.github,
+            }
+          } : null,
+        },
+      };
+    } catch (error) {
+      throw new BadRequestException(error.message);
+    }
+  }
+
+  @Get('ens/network-status')
+  async getNetworkStatus() {
+    try {
+      const connectivity = await this.ensService.testNetworkConnectivity();
+      const currentNetwork = this.ensService.getCurrentNetwork();
+
+      return {
+        currentNetwork,
+        connectivity,
+        supportedNetworks: ['mainnet', 'sepolia'],
+        ensSupport: {
+          mainnet: 'Full ENS support',
+          sepolia: 'Testnet ENS support'
+        }
+      };
+    } catch (error) {
+      throw new BadRequestException(error.message);
+    }
   }
 }
