@@ -20,6 +20,7 @@ interface UseMetaMaskReturn extends MetaMaskState {
   disconnect: () => void;
   switchToMainnet: () => Promise<void>;
   switchToSepolia: () => Promise<void>;
+  switchToAmoy: () => Promise<void>;
   getBalance: () => Promise<string | null>;
   getTokenBalance: (tokenAddress: string, decimals?: number) => Promise<string | null>;
   signMessage: (message: string) => Promise<string | null>;
@@ -258,6 +259,41 @@ export const useMetaMask = (): UseMetaMaskReturn => {
     }
   }, [isMetaMaskInstalled]);
 
+  // Switch to Polygon Amoy testnet
+  const switchToAmoy = useCallback(async () => {
+    if (!isMetaMaskInstalled()) return;
+
+    try {
+      await window.ethereum!.request({
+        method: 'wallet_switchEthereumChain',
+        params: [{ chainId: '0x13882' }], // Polygon Amoy testnet
+      });
+    } catch (error) {
+      console.error('Error switching to Polygon Amoy:', error);
+      // If the network doesn't exist, try to add it
+      if ((error as any).code === 4902) {
+        try {
+          await window.ethereum!.request({
+            method: 'wallet_addEthereumChain',
+            params: [{
+              chainId: '0x13882',
+              chainName: 'Polygon Amoy Testnet',
+              nativeCurrency: {
+                name: 'MATIC',
+                symbol: 'MATIC',
+                decimals: 18,
+              },
+              rpcUrls: ['https://rpc-amoy.polygon.technology/'],
+              blockExplorerUrls: ['https://amoy.polygonscan.com/'],
+            }],
+          });
+        } catch (addError) {
+          console.error('Error adding Polygon Amoy network:', addError);
+        }
+      }
+    }
+  }, [isMetaMaskInstalled]);
+
   // Send ETH transaction
   const sendTransaction = useCallback(async (to: string, amount: string): Promise<string | null> => {
     if (!isMetaMaskInstalled() || !state.account) return null;
@@ -356,8 +392,14 @@ export const useMetaMask = (): UseMetaMaskReturn => {
     const wasMainnet = state.chainId === '0x1';
     const isSepolia = chainId === '0xaa36a7';
     const wasSepolia = state.chainId === '0xaa36a7';
+    const isAmoy = chainId === '0x13882';
+    const wasAmoy = state.chainId === '0x13882';
     
-    if ((isMainnet && wasSepolia) || (isSepolia && wasMainnet)) {
+    // Reload page for major network changes
+    if ((isMainnet && (wasSepolia || wasAmoy)) || 
+        ((isSepolia || isAmoy) && wasMainnet) ||
+        (isSepolia && wasAmoy) || 
+        (isAmoy && wasSepolia)) {
       console.log('🔄 Major network change detected, reloading page...');
       setTimeout(() => window.location.reload(), 100);
     }
@@ -400,6 +442,7 @@ export const useMetaMask = (): UseMetaMaskReturn => {
     disconnect,
     switchToMainnet,
     switchToSepolia,
+    switchToAmoy,
     getBalance,
     getTokenBalance,
     signMessage,
