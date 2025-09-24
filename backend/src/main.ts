@@ -2,6 +2,7 @@ import { NestFactory } from '@nestjs/core';
 import { ValidationPipe, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import helmet from 'helmet';
+import * as express from 'express';
 import { AppModule } from './app.module';
 
 async function bootstrap() {
@@ -24,6 +25,23 @@ async function bootstrap() {
 
   const port = configService.get<number>('PORT', 3001);
   logger.log(`Application will start on port: ${port}`);
+
+  // Configure body parser limits for file uploads (especially Aadhaar documents)
+  // Since documents are sent as base64 in JSON, we need larger JSON limits
+  app.use(express.json({ 
+    limit: '50mb'
+  }));
+  app.use(express.urlencoded({ 
+    limit: '50mb',
+    extended: true,
+    parameterLimit: 50000
+  }));
+  
+  // Handle raw body for specific routes if needed
+  app.use(express.raw({ 
+    limit: '50mb',
+    type: 'application/octet-stream' 
+  }));
 
   // Security and validation
   app.use(helmet());
