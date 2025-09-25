@@ -56,9 +56,27 @@ const getNetworkName = (chainId: string | null): string => {
   }
 };
 
+// Get native currency name for display
+const getNativeCurrency = (chainId: string | null): string => {
+  switch (chainId) {
+    case '0x1': return 'ETH';
+    case '0xaa36a7': return 'SepoliaETH';
+    case '0x89': return 'MATIC';
+    case '0x13882': return 'MATIC';
+    case '0x13881': return 'MATIC';
+    default: return 'ETH';
+  }
+};
+
+// Check if current network is a testnet
+const isTestnet = (chainId: string | null): boolean => {
+  return chainId === '0xaa36a7' || chainId === '0x13882' || chainId === '0x13881';
+};
+
 // Exchange rates (in a real app, fetch from an API)
 const EXCHANGE_RATES = {
   ETH_TO_INR: 200000, // 1 ETH = ₹200,000 (example rate)
+  MATIC_TO_INR: 60, // 1 MATIC = ₹60 (example rate)
 };
 
 // Mock balances for demonstration (since token fetching might fail on testnet)
@@ -133,6 +151,7 @@ export default function PatientWalletPage() {
     getTokenBalance,
     switchToMainnet,
     switchToSepolia,
+    switchToAmoy,
     sendTransaction,
     estimateGas,
   } = useMetaMask();
@@ -207,17 +226,28 @@ export default function PatientWalletPage() {
       console.log('Loading balances for address:', metaMaskAccount.address);
       console.log('Current chain ID:', chainId);
       
-      // Get real ETH balance
-      const ethBalance = await getMetaMaskBalance();
-      console.log('ETH Balance:', ethBalance);
+      // Get real balance for current network
+      const balance = await getMetaMaskBalance();
+      console.log('Balance:', balance, 'for chain:', chainId);
       
-      // Calculate ETH value in INR  
-      const ethNum = parseFloat(ethBalance || '0');
-      const ethInr = ethNum > 0 ? `₹${(ethNum * EXCHANGE_RATES.ETH_TO_INR).toFixed(2)}` : '₹0.00';
+      // Calculate value in INR based on network
+      const balanceNum = parseFloat(balance || '0');
+      let balanceInr = '₹0.00';
+      
+      if (balanceNum > 0) {
+        if (chainId === '0x89' || chainId === '0x13882' || chainId === '0x13881') {
+          // Polygon networks use MATIC
+          balanceInr = `₹${(balanceNum * EXCHANGE_RATES.MATIC_TO_INR).toFixed(2)}`;
+        } else if (chainId === '0x1') {
+          // Ethereum mainnet
+          balanceInr = `₹${(balanceNum * EXCHANGE_RATES.ETH_TO_INR).toFixed(2)}`;
+        }
+        // Testnets don't show conversion rates
+      }
       
       const finalBalances = {
-        eth: ethBalance || '0.0000',
-        ethInr,
+        eth: balance || '0.0000',
+        ethInr: balanceInr,
         isLoading: false
       };
       
@@ -604,7 +634,7 @@ export default function PatientWalletPage() {
                         <span className="text-white text-sm font-bold">Ξ</span>
                       </div>
                       <span className="text-lg font-semibold text-gray-900">
-                        {chainId === '0xaa36a7' ? 'SepoliaETH' : 'ETH'}
+                        {getNativeCurrency(chainId)}
                       </span>
                       {chainId && chainId !== '0x1' && (
                         <span className="text-xs text-blue-600 bg-blue-100 px-2 py-1 rounded">
@@ -624,15 +654,15 @@ export default function PatientWalletPage() {
                       {balances.isLoading ? (
                         <div className="animate-pulse">Loading...</div>
                       ) : showBalance ? (
-                        `${balances.eth} ${chainId === '0xaa36a7' ? 'SepoliaETH' : 'ETH'}`
+                        `${balances.eth} ${getNativeCurrency(chainId)}`
                       ) : (
                         '****'
                       )}
                     </div>
                     <div className="text-sm text-gray-600">
                       {balances.isLoading ? '' : showBalance ? (
-                        chainId === '0xaa36a7' ? 'No conversion rate available' : 
-                        balances.ethInr === '₹0.00' ? 'No ETH balance' : balances.ethInr
+                        isTestnet(chainId) ? 'No conversion rate available' : 
+                        balances.ethInr === '₹0.00' ? 'No balance' : balances.ethInr
                       ) : '****'}
                       {chainId !== '0x1' && showBalance && (
                         <span className="ml-2 text-xs text-blue-600">
@@ -661,8 +691,8 @@ export default function PatientWalletPage() {
                     <div className="text-xs text-gray-600 space-y-1">
                       <div><strong>Chain ID:</strong> {chainId || 'Not detected'}</div>
                       <div><strong>Network:</strong> {getNetworkName(chainId)}</div>
-                      <div><strong>Expected:</strong> {chainId === '0xaa36a7' ? '✅ Sepolia (correct)' : '❌ Should be Sepolia (0xaa36a7)'}</div>
-                      <div><strong>Balance:</strong> {balances.eth} {chainId === '0xaa36a7' ? 'SepoliaETH' : 'ETH'}</div>
+                      <div><strong>Status:</strong> {(chainId === '0xaa36a7' || chainId === '0x13882') ? '✅ Supported testnet' : '⚠️ Switch to Sepolia or Amoy'}</div>
+                      <div><strong>Balance:</strong> {balances.eth} {getNativeCurrency(chainId)}</div>
                     </div>
                     <div className="flex flex-col gap-1">
                       <button
@@ -679,6 +709,15 @@ export default function PatientWalletPage() {
                           className="px-2 py-1 text-xs bg-green-100 hover:bg-green-200 text-green-800 rounded"
                         >
                           🔄 Switch to Sepolia
+                        </button>
+                      )}
+                      
+                      {chainId !== '0x13882' && (
+                        <button
+                          onClick={switchToAmoy}
+                          className="px-2 py-1 text-xs bg-purple-100 hover:bg-purple-200 text-purple-800 rounded"
+                        >
+                          🔄 Switch to Amoy
                         </button>
                       )}
                       

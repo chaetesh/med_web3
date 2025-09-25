@@ -789,6 +789,17 @@ export class BlockchainService {
       const network = await this.provider.getNetwork();
       const blockNumber = await this.provider.getBlockNumber();
       const contractAddress = await this.contract.getAddress();
+      
+      // Get SSI keys info if available
+      let ssiStatus = 'not_available';
+      try {
+        // Check if SSI environment variables exist
+        if (process.env.SSI_KEY_ID && process.env.SSI_KEY_GENERATED_AT) {
+          ssiStatus = 'available';
+        }
+      } catch (ssiError) {
+        // Ignore SSI errors
+      }
 
       return {
         status: 'connected',
@@ -796,6 +807,7 @@ export class BlockchainService {
         chainId: network.chainId.toString(),
         blockNumber,
         contractAddress,
+        ssiKeys: ssiStatus
       };
     } catch (error) {
       this.logger.error(`Failed to get blockchain status: ${error.message}`, error.stack);

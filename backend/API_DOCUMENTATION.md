@@ -819,6 +819,83 @@ Get a doctor's available appointment slots.
 
 ---
 
+## Doctor Shared Records API
+
+### Get Shared Records for Doctor
+Retrieve all medical records that have been shared with the current doctor. Records are verified with blockchain to ensure they are currently active.
+
+- **URL**: `/doctors/shared-records`
+- **Method**: `GET`
+- **Auth required**: Yes (Doctor only)
+- **Query Parameters**:
+  - `status`: (Optional) Filter by sharing status ('active', 'expired'). Default: 'active'
+  - `patientId`: (Optional) Filter by specific patient
+  - `sortBy`: (Optional) Sort by field ('sharedDate', 'expiryDate'). Default: 'sharedDate'
+  - `order`: (Optional) Sort order ('asc', 'desc'). Default: 'desc'
+  - `page`: (Optional) Page number for pagination. Default: 1
+  - `limit`: (Optional) Number of results per page. Default: 10
+- **Response**:
+  ```json
+  {
+    "total": 15,
+    "page": 1,
+    "limit": 10,
+    "records": [
+      {
+        "_id": "60d21b4667d0d8992e610c95",
+        "title": "Blood Test Results",
+        "recordType": "lab_result",
+        "patient": {
+          "_id": "60d21b4667d0d8992e610c85",
+          "firstName": "John",
+          "lastName": "Doe"
+        },
+        "sharedDate": "2025-09-01T14:30:00.000Z",
+        "expiryDate": "2025-09-30T14:30:00.000Z",
+        "status": "active",
+        "accessCount": 2,
+        "lastAccessed": "2025-09-15T10:15:00.000Z"
+      }
+    ]
+  }
+  ```
+
+### Get Shared Record Details
+Get detailed information about a specific shared medical record. Access is verified with blockchain to ensure the doctor has current access rights.
+
+- **URL**: `/doctors/shared-records/:id`
+- **Method**: `GET`
+- **Auth required**: Yes (Doctor only)
+- **Response**:
+  ```json
+  {
+    "_id": "60d21b4667d0d8992e610c95",
+    "title": "Blood Test Results",
+    "recordType": "lab_result",
+    "description": "Complete blood count",
+    "ipfsHash": "QmZQx7GVyuWs2cBmNxVVVo5FhcX4FMFzxd9dLwDwJCgQmq",
+    "contentHash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "blockchainTxHash": "0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
+    "originalFilename": "blood_test_results.pdf",
+    "mimeType": "application/pdf",
+    "patient": {
+      "_id": "60d21b4667d0d8992e610c85",
+      "firstName": "John",
+      "lastName": "Doe",
+      "email": "john.doe@example.com",
+      "phone": "+1-555-0123"
+    },
+    "recordDate": "2025-06-22T10:00:00.000Z",
+    "sharedDate": "2025-09-01T14:30:00.000Z",
+    "expiryDate": "2025-09-30T14:30:00.000Z",
+    "status": "active",
+    "accessCount": 2,
+    "lastAccessed": "2025-09-15T10:15:00.000Z"
+  }
+  ```
+
+---
+
 ## Wallet API
 
 ### Get Patient Wallet Information

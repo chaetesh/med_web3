@@ -63,4 +63,38 @@ export class DoctorsController {
   ) {
     return this.doctorsService.getPatientDetails(patientId, req.user.id);
   }
+
+  @Get('shared-records')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.DOCTOR)
+  async getSharedRecords(
+    @Request() req,
+    @Query('status') status?: string,
+    @Query('patientId') patientId?: string,
+    @Query('sortBy') sortBy?: string,
+    @Query('order') order?: string,
+    @Query('page') page?: number,
+    @Query('limit') limit?: number,
+  ) {
+    const options = {
+      status: status || 'active',
+      patientId,
+      sortBy: sortBy || 'sharedDate',
+      order: order || 'desc',
+      page: page ? Number(page) : 1,
+      limit: limit ? Number(limit) : 10,
+    };
+    
+    return this.doctorsService.getSharedRecords(req.user.id, options);
+  }
+
+  @Get('shared-records/:id')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.DOCTOR)
+  async getSharedRecordDetails(
+    @Request() req,
+    @Param('id') recordId: string,
+  ) {
+    return this.doctorsService.getSharedRecordDetails(req.user.id, recordId);
+  }
 }

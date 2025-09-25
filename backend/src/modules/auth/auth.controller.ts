@@ -8,12 +8,15 @@ import {
   HttpCode,
   BadRequestException,
   ValidationPipe,
+  Put,
+  Param,
 } from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
 import { AuthService } from './auth.service';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
 import { LocalAuthGuard } from './guards/local-auth.guard';
 import { UserRole } from '../users/schemas/user.schema';
+import { ProofType } from './schemas/verifiable-credential.schema';
 import {
   IsEmail,
   IsString,
@@ -22,7 +25,12 @@ import {
   IsOptional,
   MinLength,
   Matches,
+  IsArray,
+  ValidateNested,
+  IsDateString,
+  IsObject,
 } from 'class-validator';
+import { Type } from 'class-transformer';
 
 // DTOs
 class RegisterDto {
@@ -123,6 +131,155 @@ class LinkWalletDto {
     message: 'Invalid Ethereum address format',
   })
   walletAddress: string;
+}
+
+// SSI-related DTOs
+class ProofMetadataDto {
+  @IsString({ message: 'Issuer must be a string' })
+  @IsNotEmpty({ message: 'Issuer is required' })
+  issuer: string;
+
+  @IsDateString({}, { message: 'Issued date must be a valid date string' })
+  @IsNotEmpty({ message: 'Issued date is required' })
+  issuedDate: string;
+
+  @IsOptional()
+  @IsDateString({}, { message: 'Expiration date must be a valid date string' })
+  expirationDate?: string;
+
+  @IsString({ message: 'Document number must be a string' })
+  @IsNotEmpty({ message: 'Document number is required' })
+  documentNumber: string;
+
+  @IsOptional()
+  @IsString({ message: 'Holder name must be a string' })
+  holderName?: string;
+
+  @IsOptional()
+  @IsDateString({}, { message: 'Holder DOB must be a valid date string' })
+  holderDOB?: string;
+
+  @IsOptional()
+  @IsObject({ message: 'Additional fields must be an object' })
+  additionalFields?: Record<string, any>;
+}
+
+class DigitalSignatureDto {
+  @IsString({ message: 'Signature must be a string' })
+  @IsNotEmpty({ message: 'Signature is required' })
+  signature: string;
+
+  @IsString({ message: 'Algorithm must be a string' })
+  @IsNotEmpty({ message: 'Algorithm is required' })
+  algorithm: string;
+
+  @IsString({ message: 'Public key must be a string' })
+  @IsNotEmpty({ message: 'Public key is required' })
+  publicKey: string;
+
+  @IsDateString({}, { message: 'Timestamp must be a valid date string' })
+  @IsNotEmpty({ message: 'Timestamp is required' })
+  timestamp: string;
+}
+
+class ProofSubmissionDto {
+  @IsEnum(ProofType, { message: 'Invalid proof type' })
+  @IsNotEmpty({ message: 'Proof type is required' })
+  type: ProofType;
+
+  @IsString({ message: 'Document must be a base64 string' })
+  @IsNotEmpty({ message: 'Document is required' })
+  document: string; // Base64 encoded document
+
+  @ValidateNested()
+  @Type(() => ProofMetadataDto)
+  @IsNotEmpty({ message: 'Metadata is required' })
+  metadata: ProofMetadataDto;
+
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => DigitalSignatureDto)
+  signature?: DigitalSignatureDto;
+}
+
+class SSIRegisterDto {
+  @IsEmail({}, { message: 'Please provide a valid email address' })
+  @IsNotEmpty({ message: 'Email is required' })
+  email: string;
+
+  @IsString({ message: 'First name must be a string' })
+  @IsNotEmpty({ message: 'First name is required' })
+  firstName: string;
+
+  @IsString({ message: 'Last name must be a string' })
+  @IsNotEmpty({ message: 'Last name is required' })
+  lastName: string;
+
+  @IsEnum(UserRole, { message: 'Invalid user role' })
+  @IsNotEmpty({ message: 'Role is required' })
+  role: UserRole;
+
+  @IsArray({ message: 'Proofs must be an array' })
+  @ValidateNested({ each: true })
+  @Type(() => ProofSubmissionDto)
+  @IsNotEmpty({ message: 'At least one proof is required' })
+  proofs: ProofSubmissionDto[];
+
+  @IsOptional()
+  @IsString({ message: 'Wallet address must be a string' })
+  @Matches(/^0x[a-fA-F0-9]{40}$/, {
+    message: 'Invalid Ethereum address format',
+  })
+  walletAddress?: string;
+
+  @IsOptional()
+  @IsString({ message: 'Hospital ID must be a string' })
+  hospitalId?: string;
+
+  @IsOptional()
+  @IsString({ message: 'Password must be a string' })
+  @MinLength(8, { message: 'Password must be at least 8 characters long' })
+  password?: string;
+}
+
+class GovernmentProofRegisterDto {
+  @IsEmail({}, { message: 'Please provide a valid email address' })
+  @IsNotEmpty({ message: 'Email is required' })
+  email: string;
+
+  @IsString({ message: 'First name must be a string' })
+  @IsNotEmpty({ message: 'First name is required' })
+  firstName: string;
+
+  @IsString({ message: 'Last name must be a string' })
+  @IsNotEmpty({ message: 'Last name is required' })
+  lastName: string;
+
+  @IsEnum(UserRole, { message: 'Invalid user role' })
+  @IsNotEmpty({ message: 'Role is required' })
+  role: UserRole;
+
+  @IsArray({ message: 'Government proofs must be an array' })
+  @ValidateNested({ each: true })
+  @Type(() => ProofSubmissionDto)
+  @IsNotEmpty({ message: 'At least one government proof is required' })
+  governmentProofs: ProofSubmissionDto[];
+
+  @IsOptional()
+  @IsString({ message: 'Wallet address must be a string' })
+  @Matches(/^0x[a-fA-F0-9]{40}$/, {
+    message: 'Invalid Ethereum address format',
+  })
+  walletAddress?: string;
+
+  @IsOptional()
+  @IsString({ message: 'Hospital ID must be a string' })
+  hospitalId?: string;
+
+  @IsOptional()
+  @IsString({ message: 'Password must be a string' })
+  @MinLength(8, { message: 'Password must be at least 8 characters long' })
+  password?: string;
 }
 
 @Controller('auth')
@@ -226,5 +383,173 @@ export class AuthController {
   @Post('refresh')
   async refreshToken(@Request() req) {
     return this.authService.refreshToken(req.user.id);
+  }
+
+  // SSI Registration Endpoints
+  @Post('ssi/register')
+  async registerWithSSI(@Body(new ValidationPipe()) ssiRegisterDto: SSIRegisterDto) {
+    try {
+      const result = await this.authService.registerWithSSI({
+        email: ssiRegisterDto.email,
+        firstName: ssiRegisterDto.firstName,
+        lastName: ssiRegisterDto.lastName,
+        role: ssiRegisterDto.role,
+        proofs: ssiRegisterDto.proofs.map(proof => ({
+          type: proof.type,
+          document: proof.document,
+          metadata: {
+            ...proof.metadata,
+            issuedDate: new Date(proof.metadata.issuedDate),
+            expirationDate: proof.metadata.expirationDate 
+              ? new Date(proof.metadata.expirationDate) 
+              : undefined,
+            holderDOB: proof.metadata.holderDOB 
+              ? new Date(proof.metadata.holderDOB) 
+              : undefined,
+            additionalFields: proof.metadata.additionalFields || {},
+          },
+          signature: proof.signature ? {
+            ...proof.signature,
+            timestamp: new Date(proof.signature.timestamp),
+          } : undefined,
+        })),
+        walletAddress: ssiRegisterDto.walletAddress,
+        hospitalId: ssiRegisterDto.hospitalId,
+      });
+
+      return {
+        message: 'User registered successfully with Self Sovereign Identity',
+        userId: result.user._id,
+        credentialIds: result.credentialIds,
+        credentialsCount: result.credentialIds.length,
+      };
+    } catch (error) {
+      throw new BadRequestException(error.message);
+    }
+  }
+
+  @Post('government-proofs/register')
+  async registerWithGovernmentProofs(
+    @Body(new ValidationPipe()) governmentProofDto: GovernmentProofRegisterDto,
+  ) {
+    try {
+      const result = await this.authService.registerWithGovernmentProofs(
+        governmentProofDto.email,
+        governmentProofDto.firstName,
+        governmentProofDto.lastName,
+        governmentProofDto.role,
+        governmentProofDto.governmentProofs.map(proof => ({
+          type: proof.type,
+          document: proof.document,
+          metadata: {
+            ...proof.metadata,
+            issuedDate: new Date(proof.metadata.issuedDate),
+            expirationDate: proof.metadata.expirationDate 
+              ? new Date(proof.metadata.expirationDate) 
+              : undefined,
+            holderDOB: proof.metadata.holderDOB 
+              ? new Date(proof.metadata.holderDOB) 
+              : undefined,
+            additionalFields: proof.metadata.additionalFields || {},
+          },
+          signature: proof.signature ? {
+            ...proof.signature,
+            timestamp: new Date(proof.signature.timestamp),
+          } : undefined,
+        })),
+        {
+          walletAddress: governmentProofDto.walletAddress,
+          hospitalId: governmentProofDto.hospitalId,
+          password: governmentProofDto.password,
+        },
+      );
+
+      return {
+        message: 'User registered successfully with government-issued proofs',
+        userId: result.user._id,
+        credentialIds: result.credentialIds,
+        supportedProofs: [
+          'Aadhaar Card',
+          'Passport',
+          'Driving License',
+          'PAN Card',
+          'Voter ID',
+          'Medical License',
+          'Education Certificates',
+          'Professional Licenses',
+        ],
+      };
+    } catch (error) {
+      throw new BadRequestException(error.message);
+    }
+  }
+
+  // Get supported government proof types
+  @Get('ssi/supported-proofs')
+  getSupportedProofs() {
+    return {
+      governmentProofs: Object.values(ProofType).map(type => ({
+        type,
+        description: this.getProofDescription(type),
+        required: this.isRequiredForAnyRole(type),
+      })),
+      roleRequirements: {
+        doctor: ['aadhaar', 'medical_license', 'education_certificate'],
+        hospital_admin: ['aadhaar', 'professional_license', 'hospital_affiliation'],
+        patient: ['aadhaar'],
+        system_admin: ['aadhaar', 'professional_license'],
+      },
+      uploadLimits: {
+        maxDocumentSize: '30MB',
+        maxTotalPayload: '50MB',
+        supportedFormats: ['PDF', 'JPG', 'JPEG', 'PNG'],
+        note: 'Documents are uploaded as base64-encoded strings in JSON format'
+      }
+    };
+  }
+
+  // Validate user credentials
+  @UseGuards(JwtAuthGuard)
+  @Get('ssi/validate-credentials')
+  async validateCredentials(@Request() req) {
+    try {
+      const isValid = await this.authService.validateUserCredentials(req.user.id);
+      return {
+        isValid,
+        message: isValid 
+          ? 'All required credentials are verified' 
+          : 'Some required credentials are missing or unverified',
+      };
+    } catch (error) {
+      throw new BadRequestException(error.message);
+    }
+  }
+
+  // Helper methods
+  private getProofDescription(type: ProofType): string {
+    const descriptions = {
+      [ProofType.GOVERNMENT_ID]: 'Any government-issued identity document',
+      [ProofType.PASSPORT]: 'International passport document',
+      [ProofType.DRIVING_LICENSE]: 'Valid driving license',
+      [ProofType.AADHAAR]: 'Aadhaar card (India)',
+      [ProofType.VOTER_ID]: 'Voter identification card',
+      [ProofType.PAN_CARD]: 'Permanent Account Number card (India)',
+      [ProofType.MEDICAL_LICENSE]: 'Medical practice license',
+      [ProofType.EDUCATION_CERTIFICATE]: 'Educational qualification certificate',
+      [ProofType.PROFESSIONAL_LICENSE]: 'Professional certification or license',
+      [ProofType.HOSPITAL_AFFILIATION]: 'Hospital employment or affiliation proof',
+      [ProofType.OTHER]: 'Other verifiable credentials',
+    };
+    return descriptions[type] || 'Verifiable credential';
+  }
+
+  private isRequiredForAnyRole(type: ProofType): boolean {
+    const requiredTypes = [
+      ProofType.GOVERNMENT_ID,
+      ProofType.AADHAAR, // Added Aadhaar as an acceptable government ID
+      ProofType.MEDICAL_LICENSE,
+      ProofType.PROFESSIONAL_LICENSE,
+    ];
+    return requiredTypes.includes(type);
   }
 }

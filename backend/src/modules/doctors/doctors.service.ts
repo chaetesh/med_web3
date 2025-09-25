@@ -5,6 +5,8 @@ import { DoctorProfile } from './schemas/doctor-profile.schema';
 import { User, UserRole } from '../users/schemas/user.schema';
 import { Appointment } from '../appointments/schemas/appointment.schema';
 import { Hospital } from '../hospitals/schemas/hospital.schema';
+import { MedicalRecord } from '../medical-records/schemas/medical-record.schema';
+import { BlockchainService } from '../blockchain/blockchain.service';
 
 @Injectable()
 export class DoctorsService {
@@ -14,8 +16,9 @@ export class DoctorsService {
     @InjectModel(User.name) private userModel: Model<User>,
     @InjectModel(DoctorProfile.name) private doctorProfileModel: Model<DoctorProfile>,
     @InjectModel(Appointment.name) private appointmentModel: Model<Appointment>,
-    @InjectModel('MedicalRecord') private medicalRecordModel: Model<any>,
+    @InjectModel('MedicalRecord') private medicalRecordModel: Model<MedicalRecord>,
     @InjectModel(Hospital.name) private hospitalModel: Model<Hospital>,
+    private readonly blockchainService: BlockchainService,
   ) {}
 
   async getDoctorProfile(doctorId: string): Promise<any> {
@@ -393,7 +396,7 @@ export class DoctorsService {
         .find(query)
         .skip(skip)
         .limit(limit)
-        .select('firstName lastName email hospitalId profileData')
+        .select('firstName lastName email hospitalId profileData walletAddress') // Added walletAddress field
         .exec();
 
       const total = await this.userModel.countDocuments(query);
@@ -427,6 +430,7 @@ export class DoctorsService {
             firstName: doctor.firstName,
             lastName: doctor.lastName,
             email: doctor.email,
+            walletAddress: doctor.walletAddress || null,
             specialization: profile?.specialization || 'General Practitioner',
             department: profile?.department || 'General',
             experience: profile?.experience || 0,
@@ -465,6 +469,224 @@ export class DoctorsService {
     } catch (error) {
       this.logger.error(`Error fetching public doctors: ${error.message}`, error.stack);
       throw error;
+    }
+  }
+
+  async getSharedRecords(doctorId: string, options: any): Promise<any> {
+    try {
+      const { status, patientId, sortBy, order, page, limit } = options;
+      const currentTime = Math.floor(Date.now() / 1000); // Current timestamp in seconds
+      
+      // Get the doctor's user object to get wallet address
+      const doctor = await this.userModel.findById(doctorId);
+      if (!doctor || doctor.role !== UserRole.DOCTOR) {
+        throw new NotFoundException('Doctor not found');
+      }
+
+      const query: any = {
+        sharedWith: { $elemMatch: { $eq: new Types.ObjectId(doctorId) } }
+      };
+
+      // Filter by patient if specified
+      if (patientId) {
+        query.patientId = new Types.ObjectId(patientId);
+      }
+
+      // Get records shared with the doctor
+      const records = await this.medicalRecordModel
+        .find(query)
+        .populate('patientId', 'firstName lastName walletAddress')
+        .sort({ [sortBy]: order === 'asc' ? 1 : -1 })
+        .skip((page - 1) * limit)
+        .limit(limit)
+        .lean();
+
+      const total = await this.medicalRecordModel.countDocuments(query);
+
+      // Verify blockchain access for each record
+      const verifiedRecords = await Promise.all(
+        records.map(async (record) => {
+          let isActive = false;
+          
+          try {
+            // Check blockchain access
+            if (doctor.walletAddress && record.patientId?.walletAddress) {
+              isActive = await this.blockchainService.checkAccess(
+                doctor.walletAddress,
+                record.patientId.walletAddress,
+                record._id.toString()
+              );
+            }
+            
+            // Only include active records if status filter is 'active'
+            if (status === 'active' && !isActive) {
+              return null;
+            }
+            
+            // Only include expired records if status filter is 'expired'
+            if (status === 'expired' && isActive) {
+              return null;
+            }
+            
+            return {
+              _id: record._id,
+              title: record.title,
+              recordType: record.recordType,
+              patient: {
+                _id: record.patientId._id,
+                firstName: record.patientId.firstName,
+                lastName: record.patientId.lastName
+              },
+              sharedDate: this.getShareDate(record, doctorId),
+              expiryDate: this.getExpiryDate(record, doctorId),
+              status: isActive ? 'active' : 'expired',
+              accessCount: this.getAccessCount(record, doctorId),
+              lastAccessed: this.getLastAccessed(record, doctorId)
+            };
+          } catch (error) {
+            this.logger.error(`Error verifying blockchain access: ${error.message}`, error.stack);
+            return null;
+          }
+        })
+      );
+
+      // Filter out null records (those that didn't match status criteria)
+      const filteredRecords = verifiedRecords.filter(record => record !== null);
+
+      return {
+        total,
+        page,
+        limit,
+        records: filteredRecords
+      };
+    } catch (error) {
+      this.logger.error(`Error getting shared records: ${error.message}`, error.stack);
+      throw error;
+    }
+  }
+
+  async getSharedRecordDetails(doctorId: string, recordId: string): Promise<any> {
+    try {
+      // Find the record
+      const record = await this.medicalRecordModel
+        .findOne({
+          _id: recordId,
+          sharedWith: { $elemMatch: { $eq: new Types.ObjectId(doctorId) } }
+        })
+        .populate('patientId', 'firstName lastName email profileData.phone walletAddress')
+        .lean();
+
+      if (!record) {
+        throw new NotFoundException('Medical record not found or not shared with you');
+      }
+
+      // Get the doctor's wallet address
+      const doctor = await this.userModel.findById(doctorId);
+      if (!doctor || doctor.role !== UserRole.DOCTOR) {
+        throw new NotFoundException('Doctor not found');
+      }
+
+      // Verify blockchain access
+      let isActive = false;
+      try {
+        if (doctor.walletAddress && record.patientId?.walletAddress) {
+          isActive = await this.blockchainService.checkAccess(
+            doctor.walletAddress,
+            record.patientId.walletAddress,
+            record._id.toString()
+          );
+        }
+      } catch (error) {
+        this.logger.error(`Error verifying blockchain access: ${error.message}`, error.stack);
+      }
+
+      if (!isActive) {
+        throw new ForbiddenException('Your access to this record has expired or been revoked');
+      }
+
+      // Log access
+      await this.logRecordAccess(record._id, doctorId);
+
+      // Return formatted record details
+      return {
+        _id: record._id,
+        title: record.title,
+        recordType: record.recordType,
+        description: record.description,
+        ipfsHash: record.ipfsHash,
+        contentHash: record.contentHash,
+        blockchainTxHash: record.blockchainTxHash,
+        originalFilename: record.originalFilename,
+        mimeType: record.mimeType,
+        patient: {
+          _id: record.patientId._id,
+          firstName: record.patientId.firstName,
+          lastName: record.patientId.lastName,
+          email: record.patientId.email,
+          phone: record.patientId.profileData?.phone || 'N/A'
+        },
+        recordDate: record.recordDate,
+        sharedDate: this.getShareDate(record, doctorId),
+        expiryDate: this.getExpiryDate(record, doctorId),
+        status: isActive ? 'active' : 'expired',
+        accessCount: this.getAccessCount(record, doctorId),
+        lastAccessed: this.getLastAccessed(record, doctorId)
+      };
+    } catch (error) {
+      this.logger.error(`Error getting shared record details: ${error.message}`, error.stack);
+      throw error;
+    }
+  }
+
+  private getShareDate(record: any, userId: string): Date {
+    const shareEvent = record.accessHistory?.find(
+      (entry: any) => entry.userId.toString() === userId && entry.action === 'share_granted'
+    );
+    return shareEvent ? shareEvent.timestamp : new Date();
+  }
+
+  private getExpiryDate(record: any, userId: string): Date {
+    const shareEvent = record.accessHistory?.find(
+      (entry: any) => entry.userId.toString() === userId && entry.action === 'share_granted'
+    );
+    return shareEvent && shareEvent.expirationTime ? shareEvent.expirationTime : new Date();
+  }
+
+  private getAccessCount(record: any, userId: string): number {
+    return record.accessHistory?.filter(
+      (entry: any) => entry.userId.toString() === userId && entry.action === 'accessed'
+    ).length || 0;
+  }
+
+  private getLastAccessed(record: any, userId: string): Date | null {
+    const accessEvents = record.accessHistory?.filter(
+      (entry: any) => entry.userId.toString() === userId && entry.action === 'accessed'
+    );
+    if (!accessEvents || accessEvents.length === 0) {
+      return null;
+    }
+    // Sort by timestamp desc and get the most recent
+    return accessEvents.sort((a: any, b: any) => 
+      new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
+    )[0].timestamp;
+  }
+
+  private async logRecordAccess(recordId: any, userId: string): Promise<void> {
+    try {
+      await this.medicalRecordModel.findByIdAndUpdate(
+        recordId,
+        {
+          $push: {
+            accessHistory: {
+              userId,
+              action: 'accessed',
+              timestamp: new Date()
+            }
+          }
+        }
+      );
+    } catch (error) {
+      this.logger.error(`Error logging record access: ${error.message}`, error.stack);
     }
   }
 
