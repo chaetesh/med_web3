@@ -74,6 +74,7 @@ const Sidebar = ({ children }: SidebarProps) => {
           { href: '/doctor/search', icon: Search, label: 'Search Patients' },
           { href: '/doctor/appointments', icon: Bell, label: 'My Appointments' },
           { href: '/doctor/records', icon: FileText, label: 'Upload Records' },
+          { href: '/doctor/shared-records', icon: Shield, label: 'Shared Records' },
           { href: '/doctor/access', icon: Shield, label: 'QR/OTP Access' },
           { href: '/doctor/profile', icon: Settings, label: 'Profile' },
         ];

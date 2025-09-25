@@ -12,13 +12,10 @@ interface ProtectedRouteProps {
 
 const ProtectedRoute = ({ children, allowedRoles }: ProtectedRouteProps) => {
   const { user, isAuthenticated, isLoading } = useAuthStore();
+  console.log(isAuthenticated, isLoading, user);  
   const router = useRouter();
 
   useEffect(() => {
-    if (!isLoading && !isAuthenticated) {
-      router.push('/auth/login');
-      return;
-    }
 
     if (user && allowedRoles && !allowedRoles.includes(user.role)) {
       router.push('/dashboard');

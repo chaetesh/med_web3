@@ -15,6 +15,7 @@ export interface Doctor {
   yearsOfExperience?: number;
   consultationFee?: number;
   hospitalId?: string;
+  walletAddress?: string; // Added walletAddress field
   hospital?: {
     _id: string;
     name: string;
@@ -204,6 +205,88 @@ export class DoctorsApiService {
     return this.getDoctors({
       ...query,
       isAvailable: true,
+    });
+  }
+
+  /**
+   * Get shared medical records for the logged-in doctor
+   * @param query Query parameters for filtering and pagination
+   * @returns Shared records with pagination
+   */
+  static async getSharedRecords(query: {
+    status?: 'active' | 'expired',
+    patientId?: string,
+    sortBy?: 'sharedDate' | 'expiryDate' | 'patientName',
+    order?: 'asc' | 'desc',
+    page?: number,
+    limit?: number
+  } = {}) {
+    const searchParams = new URLSearchParams();
+    
+    Object.entries(query).forEach(([key, value]) => {
+      if (value !== undefined && value !== null) {
+        searchParams.append(key, value.toString());
+      }
+    });
+
+    const queryString = searchParams.toString();
+    const endpoint = `/doctors/shared-records${queryString ? `?${queryString}` : ''}`;
+    
+    return apiRequest<{
+      total: number;
+      page: number;
+      limit: number;
+      records: Array<{
+        _id: string;
+        title: string;
+        recordType: string;
+        patient: {
+          _id: string;
+          firstName: string;
+          lastName: string;
+        };
+        sharedDate: string;
+        expiryDate: string;
+        status: 'active' | 'expired';
+        accessCount: number;
+        lastAccessed: string | null;
+      }>;
+    }>(endpoint, {
+      method: 'GET',
+    });
+  }
+
+  /**
+   * Get details of a specific shared medical record
+   * @param recordId ID of the shared record to fetch
+   * @returns Detailed record information
+   */
+  static async getSharedRecordDetails(recordId: string) {
+    return apiRequest<{
+      _id: string;
+      title: string;
+      recordType: string;
+      description: string;
+      ipfsHash: string;
+      contentHash: string;
+      blockchainTxHash: string;
+      originalFilename: string;
+      mimeType: string;
+      patient: {
+        _id: string;
+        firstName: string;
+        lastName: string;
+        email: string;
+        phone: string;
+      };
+      recordDate: string;
+      sharedDate: string;
+      expiryDate: string;
+      status: 'active' | 'expired';
+      accessCount: number;
+      lastAccessed: string | null;
+    }>(`/doctors/shared-records/${recordId}`, {
+      method: 'GET',
     });
   }
 }
