@@ -3,12 +3,17 @@ import React, { useState, useEffect } from 'react';
 import { GeneticRiskService } from '../../lib/services/genetic-risk.service';
 import { GeneticRiskAssessment } from '../../lib/types/family.types';
 import Button from '../Button';
+import PaymentModal from '../ui/PaymentModal';
 
 export const GeneticRiskAssessmentList: React.FC = () => {
   const [assessments, setAssessments] = useState<GeneticRiskAssessment[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
   const [generating, setGenerating] = useState<boolean>(false);
+  const [showPaymentModal, setShowPaymentModal] = useState<boolean>(false);
+  const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  const [transactionHash, setTransactionHash] = useState<string | null>(null);
+  const [paymentInProgress, setPaymentInProgress] = useState<boolean>(false);
 
   useEffect(() => {
     fetchAssessments();
@@ -28,12 +33,55 @@ export const GeneticRiskAssessmentList: React.FC = () => {
     }
   };
 
-  const handleGenerateAssessment = async () => {
+  const handleGenerateClick = () => {
+    // Don't show payment modal if payment is already in progress
+    if (paymentInProgress) {
+      console.log('Payment already in progress, ignoring click');
+      return;
+    }
+    
+    // Show payment modal when user clicks the generate button
+    setShowPaymentModal(true);
+    // Clear previous messages and states
+    setSuccessMessage(null);
+    setTransactionHash(null);
+    setGenerating(false);
+    // Mark payment as in progress
+    setPaymentInProgress(true);
+  };
+
+  // This handler will receive the transaction hash from the payment modal
+  const handlePaymentComplete = async (txHash?: string) => {
+    // First thing: immediately close the modal to prevent double payments
+    setShowPaymentModal(false);
+    
+    // Store the transaction hash if provided
+    if (txHash) {
+      setTransactionHash(txHash);
+    }
+    
+    // Keep payment in progress flag for a bit to prevent immediate re-clicks
+    // Reset after 5 seconds
+    setTimeout(() => {
+      setPaymentInProgress(false);
+    }, 5000);
+    
+    // Proceed with generating the assessment
     try {
       setGenerating(true);
       setError(null);
-      const newAssessments = await GeneticRiskService.generateRiskAssessment();
+      
+      // Pass the transaction hash to the service so it doesn't trigger another payment
+      const newAssessments = await GeneticRiskService.generateRiskAssessment(txHash);
       setAssessments(newAssessments);
+      
+      // Set success message
+      setSuccessMessage('Payment successful! Your new risk assessment has been generated.');
+      
+      // Clear success message after 10 seconds
+      setTimeout(() => {
+        setSuccessMessage(null);
+      }, 10000);
     } catch (err) {
       setError('Failed to generate risk assessment');
       console.error(err);
@@ -49,13 +97,53 @@ export const GeneticRiskAssessmentList: React.FC = () => {
       <div className="flex justify-between items-center mb-6">
         <h3 className="text-lg font-medium">Genetic Risk Assessments</h3>
         <Button
-          onClick={handleGenerateAssessment}
+          onClick={handleGenerateClick}
           disabled={generating}
           variant="primary"
         >
           {generating ? 'Generating...' : 'Generate New Assessment'}
         </Button>
+        
+        {/* Payment Modal */}
+        <PaymentModal
+          isOpen={showPaymentModal}
+          onClose={() => {
+            setShowPaymentModal(false);
+            // Don't immediately reset payment in progress - leave a small delay
+            // to prevent rapid re-opening of the modal
+            setTimeout(() => {
+              setPaymentInProgress(false);
+            }, 1000);
+          }}
+          onPaymentComplete={handlePaymentComplete}
+          amount="0.05"
+          serviceName="Genetic Risk Assessment"
+        />
       </div>
+      
+      {successMessage && (
+        <div className="bg-green-50 text-green-600 p-3 rounded-md mb-4 flex items-center">
+          <svg className="w-5 h-5 mr-2" fill="currentColor" viewBox="0 0 20 20">
+            <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
+          </svg>
+          <div>
+            <p>{successMessage}</p>
+            {transactionHash && (
+              <p className="text-sm mt-1">
+                Transaction: 
+                <a 
+                  href={`https://www.oklink.com/amoy/tx/${transactionHash}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="ml-1 underline hover:text-green-800"
+                >
+                  View on Explorer
+                </a>
+              </p>
+            )}
+          </div>
+        </div>
+      )}
       
       {error && (
         <div className="bg-red-50 text-red-600 p-3 rounded-md mb-4">

@@ -12,6 +12,7 @@ import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { UserRole } from '../users/schemas/user.schema';
 import { GeneticRiskService } from './genetic-risk.service';
+import { X402PaymentMiddleware } from '../payments/x402-payment.middleware';
 import { Request } from 'express';
 
 @Controller('genetic-risk')
