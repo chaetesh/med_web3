@@ -48,6 +48,7 @@
     "graphql": "^16.11.0",
     "helmet": "^8.1.0",
     "@lighthouse-web3/sdk": "^0.3.0",
+    "x402-express": "^0.5.0",
     "mongoose": "^8.18.0",
     "multer": "^2.0.2",
     "passport": "^0.7.0",

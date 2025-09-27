@@ -13,6 +13,8 @@ import { AccessLogsModule } from './modules/access-logs/access-logs.module';
 import { DoctorsModule } from './modules/doctors/doctors.module';
 import { WalletModule } from './modules/wallet/wallet.module';
 import { AdminModule } from './modules/admin/admin.module';
+import { FamilyModule } from './modules/family/family.module';
+import { PaymentsModule } from './modules/payments/payments.module';
 import { CommonModule } from './common/common.module';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
@@ -44,6 +46,8 @@ import { AppService } from './app.service';
     DoctorsModule,
     WalletModule,
     AdminModule,
+    FamilyModule,
+    PaymentsModule,
   ],
   controllers: [AppController],
   providers: [AppService],

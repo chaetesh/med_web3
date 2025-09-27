@@ -2,7 +2,8 @@
 
 import { useState, useEffect } from 'react';
 import { DoctorsApiService } from '@/lib/services/doctors.service';
-import { Shield, FileCheck, Calendar, Clock, Search, User, FileText } from 'lucide-react';
+import { MedicalRecordsService } from '@/lib/services/medical-records.service';
+import { Shield, FileCheck, Calendar, Clock, Search, User, FileText, CheckCircle } from 'lucide-react';
 import PageHeader from '@/components/PageHeader';
 import Button from '@/components/Button';
 import { format } from 'date-fns';
@@ -65,10 +66,16 @@ const SharedRecordsPage = () => {
   
   const recordsPerPage = 9;
 
+  const [currentSharedRecords, setCurrentSharedRecords] = useState<any[]>([]);
+  const [loadingCurrent, setLoadingCurrent] = useState<boolean>(false);
+  const [currentError, setCurrentError] = useState<string | null>(null);
+
   useEffect(() => {
     fetchSharedRecords();
+    fetchCurrentSharedRecords();
   }, [currentPage, activeFilter]);
 
+  // Fetch all shared records
   const fetchSharedRecords = async () => {
     try {
       setLoading(true);
@@ -87,6 +94,23 @@ const SharedRecordsPage = () => {
       console.error('Error fetching shared records:', err);
       setError('Failed to fetch shared records. Please try again later.');
       setLoading(false);
+    }
+  };
+  
+  // Fetch blockchain verified currently shared records
+  const fetchCurrentSharedRecords = async () => {
+    try {
+      setLoadingCurrent(true);
+      setCurrentError(null);
+      
+      // Use the new API endpoint
+      const response = await MedicalRecordsService.getCurrentSharedRecords();
+      setCurrentSharedRecords(response.records);
+      setLoadingCurrent(false);
+    } catch (err) {
+      console.error('Error fetching currently shared records:', err);
+      setCurrentError('Failed to fetch blockchain-verified shared records.');
+      setLoadingCurrent(false);
     }
   };
 
@@ -362,6 +386,76 @@ const SharedRecordsPage = () => {
         </div>
       </div>
 
+      {/* Blockchain Verified Currently Shared Records Section */}
+      <div className="mb-10">
+        <h2 className="text-xl font-bold text-gray-900 mb-4 flex items-center">
+          <Shield className="h-5 w-5 mr-2 text-blue-600" />
+          Blockchain Verified Currently Shared Records
+        </h2>
+        
+        {loadingCurrent ? (
+          <div className="flex justify-center items-center h-40">
+            <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-blue-600"></div>
+          </div>
+        ) : currentError ? (
+          <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded relative mb-6">
+            {currentError}
+          </div>
+        ) : currentSharedRecords.length === 0 ? (
+          <div className="flex flex-col justify-center items-center h-40 bg-gray-50 rounded-lg">
+            <Shield className="h-12 w-12 text-gray-400 mx-auto mb-3" />
+            <p className="text-gray-500 text-lg">No blockchain-verified active shared records found</p>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            {currentSharedRecords.map((record) => (
+              <div 
+                key={record._id} 
+                className="bg-white rounded-lg shadow overflow-hidden hover:shadow-lg transition-all border border-blue-200"
+              >
+                <div className="p-6">
+                  <div className="flex justify-between items-start">
+                    <h3 className="text-lg font-semibold text-gray-900 mb-2 truncate">
+                      {record.title}
+                    </h3>
+                    <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
+                      <CheckCircle className="h-3 w-3 mr-1" />
+                      Verified
+                    </span>
+                  </div>
+                  
+                  <div className="mt-4 space-y-2">
+                    <div className="flex items-center text-sm text-gray-600">
+                      <FileCheck className="h-4 w-4 mr-2" />
+                      <span>{record.recordType}</span>
+                    </div>
+                    <div className="flex items-center text-sm text-gray-600">
+                      <User className="h-4 w-4 mr-2" />
+                      <span>From: {record.patientId?.firstName} {record.patientId?.lastName}</span>
+                    </div>
+                    <div className="flex items-center text-sm text-gray-600">
+                      <Calendar className="h-4 w-4 mr-2" />
+                      <span>Date: {format(new Date(record.recordDate), 'MMM d, yyyy')}</span>
+                    </div>
+                  </div>
+                  
+                  <div className="mt-6">
+                    <Button 
+                      onClick={() => handleViewDetails(record._id)}
+                      className="w-full bg-blue-600 hover:bg-blue-700"
+                    >
+                      View Details
+                    </Button>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+      
+      <h2 className="text-xl font-bold text-gray-900 mb-4">All Shared Records</h2>
+      
       {loading ? (
         <div className="flex justify-center items-center h-64">
           <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-blue-600"></div>

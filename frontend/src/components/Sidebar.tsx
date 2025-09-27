@@ -86,6 +86,7 @@ const Sidebar = ({ children }: SidebarProps) => {
           { href: '/patient/records', icon: FileText, label: 'My Records' },
           { href: '/patient/upload', icon: FileText, label: 'Upload Record' },
           { href: '/patient/share', icon: Shield, label: 'Share Record' },
+          { href: '/patient/family', icon: Users, label: 'Family & Genetic Risk' },
           { href: '/patient/access-logs', icon: Activity, label: 'Access Logs' },
           { href: '/patient/wallet', icon: Settings, label: 'Wallet & Security' },
           { href: '/patient/settings', icon: Settings, label: 'Settings' },
